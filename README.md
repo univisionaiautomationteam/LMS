@@ -88,6 +88,10 @@ npm run dev
 Proprietary — all rights reserved.
 
 
+Testing purpose and demo purpose we can use this below details : 
+
+all data should need to in the monogodb before testing:
+
 
 Connected to MongoDB
 Created admin account: admin@taraslearn.com / Admin@12345
