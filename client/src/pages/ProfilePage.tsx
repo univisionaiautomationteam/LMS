@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { api } from "../api/client";
+import { api, roleLabel } from "../api/client";
 import { INDIA_STATES } from "../data/constants";
+import TeacherProfileFields from "../components/profile/TeacherProfileFields";
+import StudentProfileFields from "../components/profile/StudentProfileFields";
 
 export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
   const { user, setUser } = useAuth();
@@ -10,8 +12,12 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
 
   if (!user) return null;
 
-  const isAdmin = user.role === "admin";
-  if (isAdmin) {
+  const isSuperAdmin = user.role === "admin";
+  const isCollegeAdmin = user.role === "collegeAdmin";
+  const isTeacher = user.role === "teacher";
+  const isStudent = !isSuperAdmin && !isCollegeAdmin && !isTeacher;
+
+  if (isSuperAdmin) {
     return (
       <div className="page-content profile-page">
         <section className="admin-profile-card">
@@ -33,21 +39,37 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
     const payload: Record<string, unknown> = {
       collegeName: String(form.get("collegeName") ?? "").trim(),
       department: String(form.get("department") ?? "").trim(),
-      degree: String(form.get("degree") ?? "").trim(),
-      studyYear: String(form.get("studyYear") ?? "").trim(),
       state: String(form.get("state") ?? "").trim(),
       city: String(form.get("city") ?? "").trim(),
       pincode: String(form.get("pincode") ?? "").trim(),
       phone: String(form.get("phone") ?? "").trim(),
       about: String(form.get("about") ?? "").trim(),
     };
+    // Each role only posts its own detail fields; the server drops anything
+    // outside the role's allowlist, but posting blank student fields as a
+    // teacher would just be noise. A college admin has no role-detail fields.
+    if (isTeacher) {
+      payload["designation"] = String(form.get("designation") ?? "").trim();
+      payload["qualification"] = String(form.get("qualification") ?? "").trim();
+      payload["specialization"] = String(form.get("specialization") ?? "").trim();
+      payload["experienceYears"] = String(form.get("experienceYears") ?? "").trim();
+    } else if (isStudent) {
+      payload["degree"] = String(form.get("degree") ?? "").trim();
+      payload["studyYear"] = String(form.get("studyYear") ?? "").trim();
+      payload["guardianName"] = String(form.get("guardianName") ?? "").trim();
+      payload["guardianPhone"] = String(form.get("guardianPhone") ?? "").trim();
+      payload["courseType"] = String(form.get("courseType") ?? "").trim();
+    }
     const password = String(form.get("newPassword") ?? "");
     const confirm = String(form.get("confirmPassword") ?? "");
     if (password && password !== confirm) {
       setStatus("The new passwords do not match.");
       return;
     }
-    if (password) payload["newPassword"] = password;
+    if (password) {
+      payload["newPassword"] = password;
+      payload["currentPassword"] = String(form.get("currentPassword") ?? "");
+    }
     try {
       const { user: updated } = await api.updateProfile(payload);
       setUser(updated);
@@ -58,33 +80,52 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
     }
   }
 
-  const lockedCollegeName = user.collegeNameLocked && user.collegeName ? user.collegeName : "";
+  const lockedCollegeName = user.collegeNameLocked ? (user.profile?.collegeName ?? "") : "";
+  // A teacher/student's department is owned by the college admin (top-level
+  // assignment); a college admin simply stores their own on the profile.
+  const department = isCollegeAdmin
+    ? profile?.department ?? ""
+    : user.department || profile?.department || "";
 
   return (
     <div className="page-content profile-page">
       <form className="profile-form-card" onSubmit={handleSave}>
         <div className="profile-form-head">
           <div className="profile-avatar large">{profile?.photoUrl ? <img src={profile.photoUrl} alt="Profile" /> : user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}</div>
-          <div><span className="eyebrow accent">Account profile</span><h1>{user.name}</h1><p>Keep your college, contact, and profile information current.</p></div>
+          <div>
+            <span className="eyebrow accent">{isCollegeAdmin ? "College administrator profile" : "Account profile"}</span>
+            <h1>{user.name}</h1>
+            <p className="profile-identity"><span>{roleLabel(user.role)}</span><span>{user.email}</span>{department && <span>Dept: {department}</span>}</p>
+          </div>
         </div>
         <section className="profile-form-section">
           <h2>Change password (optional)</h2>
           <div className="form-row">
+            <label>Current password<input name="currentPassword" type="password" placeholder="Required to set a new password" /></label>
             <label>New password<input name="newPassword" type="password" minLength={10} placeholder="Leave blank to keep current password" /></label>
             <label>Confirm new password<input name="confirmPassword" type="password" minLength={10} placeholder="Enter it again" /></label>
+          </div>
+        </section>
+        <section className="profile-form-section">
+          <h2>Account</h2>
+          <div className="form-row">
+            <label>Email address<input value={user.email} readOnly className="locked-profile-field" aria-label="Email address" /></label>
+            <label>Role<input value={roleLabel(user.role)} readOnly className="locked-profile-field" aria-label="Role" /></label>
           </div>
         </section>
         <section className="profile-form-section">
           <h2>College details</h2>
           <div className="form-row">
             <label>College name<input className={lockedCollegeName ? "locked-profile-field" : ""} name="collegeName" required readOnly={Boolean(lockedCollegeName)} defaultValue={lockedCollegeName || profile?.collegeName} placeholder="College or university" /></label>
-            <label>Department<input name="department" required defaultValue={profile?.department ?? user.department} placeholder="e.g. Computer Science" /></label>
-          </div>
-          <div className="form-row">
-            <label>Degree / program<input name="degree" defaultValue={profile?.degree} placeholder="e.g. B.Tech" /></label>
-            <label>Current year<select name="studyYear" defaultValue={profile?.studyYear ?? "1st Year"}><option>1st Year</option><option>2nd Year</option><option>3rd Year</option><option>4th Year</option><option>Graduate</option><option>Faculty</option></select></label>
+            {isCollegeAdmin ? (
+              <label>Department<input name="department" defaultValue={department} placeholder="e.g. Administration (optional)" /></label>
+            ) : (
+              <label>Department<input value={department} readOnly className="locked-profile-field" aria-label="Department" title="Set by your college administrator" placeholder="Assigned by your college admin" /></label>
+            )}
           </div>
         </section>
+        {isTeacher && <TeacherProfileFields details={profile?.teacher} />}
+        {isStudent && <StudentProfileFields details={profile?.student} />}
         <section className="profile-form-section">
           <h2>College location and contact</h2>
           <div className="form-row">

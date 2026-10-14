@@ -1,4 +1,4 @@
-import type { Course, Language } from "../types";
+import type { Course, CourseModule, Language, Lesson } from "../types";
 
 export const INDIA_STATES = [
   "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Delhi", "Goa", "Gujarat",
@@ -21,13 +21,28 @@ export const starterCourses: Course[] = [
   { slug: "cybersecurity", title: "Cybersecurity Engineering", language: "Security", category: "Computer Science", icon: "CY", color: "#34495e", level: "Intermediate", lessons: 39, duration: "11h 20m", description: "Protect applications, systems, and networks through secure engineering practices." },
 ];
 
-export const curriculum = [
-  { title: "Welcome & setup", time: "06:12", type: "video" },
-  { title: "Values, variables & types", time: "14:35", type: "video" },
-  { title: "Control flow in practice", time: "18:20", type: "video" },
-  { title: "Practice: shipping calculator", time: "20 min", type: "code" },
-  { title: "Module knowledge check", time: "8 questions", type: "quiz" },
+// Fallback outline used until a course arrives with its own `curriculum`.
+// Keys must match the server's `defaultCurriculum` so progress lines up.
+export const curriculum: Lesson[] = [
+  { key: "welcome", title: "Welcome & setup", duration: "06:12", type: "video" },
+  { key: "variables", title: "Values, variables & types", duration: "14:35", type: "video" },
+  { key: "control-flow", title: "Control flow in practice", duration: "18:20", type: "video" },
+  { key: "practice", title: "Hands-on practice build", duration: "20 min", type: "code" },
+  { key: "quiz", title: "Module knowledge check", duration: "5 questions", type: "quiz" },
 ];
+
+/** Groups a course's lessons for display, falling back to the bundled outline. */
+export function modulesOf(course: Pick<Course, "modules" | "curriculum">): CourseModule[] {
+  if (course.modules?.length) return course.modules;
+  return [
+    {
+      moduleId: "default",
+      title: "Course content",
+      order: 0,
+      lessons: course.curriculum?.length ? course.curriculum : curriculum,
+    },
+  ];
+}
 
 export const codeSamples: Record<Language, string> = {
   python: `name = input("Enter your name: ")\ngoal = input("What will you learn? ")\nprint(f"Hello, {name}!")\nprint(f"Today I will learn {goal}.")`,

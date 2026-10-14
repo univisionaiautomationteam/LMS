@@ -105,4 +105,10 @@ Pass : teacher@gmail.com
 
 student:
 user:"tripdaries01@gmail.com" 
-Pass: tripdaries01@
+Pass: Krishna@1234
+
+
+College admin: college.admin@demo.edu / College@2026
+Teacher: teacher@demo.edu / Teacher@2026
+Student: student@demo.edu / Student@2026
+Super admin: admin@taraslearn.com / Admin@12345

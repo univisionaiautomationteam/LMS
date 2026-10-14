@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { BookOpen } from "lucide-react";
+import { courseAuthorLabel } from "../api/client";
 import type { Course } from "../types";
 
 export default function CatalogPage({
@@ -45,7 +46,7 @@ export default function CatalogPage({
               <span>{course.icon}</span><small>{course.category.toUpperCase()} PATHWAY</small>
             </button>
             <div className="catalog-body">
-              <div className="rating-row"><span className="pill">{course.level}</span></div>
+              <div className="rating-row"><span className="pill">{course.level}</span><span className="pill posted-by">By {courseAuthorLabel(course)}</span></div>
               <h2>{course.title}</h2>
               <p>{course.description}</p>
               <div className="course-facts"><span>{course.lessons} lessons</span><span>{course.duration}</span></div>

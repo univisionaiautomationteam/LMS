@@ -1,9 +1,7 @@
 import bcrypt from "bcryptjs";
 import { User } from "../models/User.js";
 import { signToken } from "../middleware/auth.js";
-import { validateEmail } from "../utils/helpers.js";
-
-const PASSWORD_MIN = 10;
+import { validateEmail, serverError, ClientError, PASSWORD_MIN } from "../utils/helpers.js";
 
 export async function login(req, res) {
   try {
@@ -24,7 +22,7 @@ export async function login(req, res) {
 
     return res.json({ user: user.toPublic(), token });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return serverError(res, error, "auth.login");
   }
 }
 
@@ -40,11 +38,12 @@ export async function completePassword(req, res) {
     }
     req.user.passwordHash = await bcrypt.hash(password, 10);
     req.user.mustChangePassword = false;
+    req.user.tokenVersion = (req.user.tokenVersion ?? 0) + 1;
     await req.user.save();
     const token = signToken(req.user);
     return res.json({ user: req.user.toPublic(), token });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return serverError(res, error, "auth.completePassword");
   }
 }
 
@@ -59,13 +58,13 @@ export async function register(req, res) {
       return res.status(400).json({ error: `Password must be at least ${PASSWORD_MIN} characters.` });
     }
     const existing = await User.findOne({ email });
-    if (existing) return res.status(409).json({ error: "An account with this email already exists." });
+    if (existing) throw new ClientError(409, "An account with this email already exists.");
 
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, passwordHash, role: "student", mustChangePassword: false });
     const token = signToken(user);
     return res.status(201).json({ user: user.toPublic(), token });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return serverError(res, error, "auth.register");
   }
 }

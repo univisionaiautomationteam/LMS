@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { api } from "../api/client";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { user, login, completePassword } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  // Driven by the account, not local state, so a reload mid-onboarding still
+  // lands on the change-password form.
+  const needsOnboarding = user?.mustChangePassword === true;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     try {
-      const result = await login(email, password);
-      setNeedsOnboarding(result.needsOnboarding);
+      await login(email, password);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");
     }
@@ -30,8 +30,7 @@ export default function LoginPage() {
       return;
     }
     try {
-      await api.completePassword(newPassword);
-      setNeedsOnboarding(false);
+      await completePassword(newPassword);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to change the password.");
     }

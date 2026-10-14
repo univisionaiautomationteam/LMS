@@ -1,16 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, setToken } from "../api/client";
+import { api, setToken, UNAUTHORIZED_EVENT } from "../api/client";
 import type { AuthUser } from "../types";
-
-type LoginResult = {
-  user: AuthUser;
-  needsOnboarding: boolean;
-};
 
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<LoginResult>;
+  login: (email: string, password: string) => Promise<void>;
+  completePassword: (password: string) => Promise<void>;
   logout: () => void;
   setUser: (user: AuthUser | null) => void;
 };
@@ -33,14 +29,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  async function login(email: string, password: string): Promise<LoginResult> {
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setToken(null);
+      setUser(null);
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+
+  async function login(email: string, password: string): Promise<void> {
     const result = await api.login(email, password);
     setToken(result.token);
+    // A user who still needs to set their own password is kept on the login
+    // screen (App gates on `mustChangePassword`) so the change-password form
+    // renders instead of the workspace.
     setUser(result.user);
-    return {
-      user: result.user,
-      needsOnboarding: result.user.mustChangePassword === true || (result.user.role !== "admin" && !result.user.profile?.complete),
-    };
+  }
+
+  async function completePassword(password: string) {
+    const { user, token } = await api.completePassword(password);
+    // The server bumps tokenVersion when the password changes, invalidating the
+    // login token, so the replacement must be stored or every next call 401s.
+    if (token) setToken(token);
+    setUser(user);
   }
 
   function logout() {
@@ -49,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, completePassword, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

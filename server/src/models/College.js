@@ -16,6 +16,9 @@ const collegeSchema = new mongoose.Schema(
     code: { type: String, required: true, uppercase: true, trim: true },
     state: { type: String, default: "" },
     active: { type: Boolean, default: true },
+    // Email domains that map an address to this college, e.g. ["abc.edu"].
+    // Used to route/validate bulk-imported accounts so `x@abc.edu` lands in ABC.
+    domains: { type: [String], default: [] },
     allowedCourseIds: { type: [String], default: [] },
     departments: { type: [departmentSchema], default: [] },
   },

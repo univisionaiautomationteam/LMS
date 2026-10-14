@@ -18,5 +18,10 @@ export default function App() {
 
   if (!user) return <LoginPage />;
 
+  // Anyone who still has to choose their own password stays on the login
+  // screen until they do — this is how a freshly created college admin (or an
+  // admin-created teacher/student) sets their private password.
+  if (user.mustChangePassword) return <LoginPage />;
+
   return <AppLayout />;
 }

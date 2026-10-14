@@ -4,6 +4,6 @@ import { getStats } from "../controllers/dashboardController.js";
 
 const router = Router();
 
-router.get("/", authRequired(["admin"]), getStats);
+router.get("/", authRequired(["admin", "collegeAdmin"]), getStats);
 
 export default router;
