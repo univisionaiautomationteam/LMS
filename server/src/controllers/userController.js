@@ -301,6 +301,14 @@ export async function updateProfile(req, res) {
       return res.status(400).json({ error: `Complete your ${profileFieldLabel(built.missing)}.` });
     }
 
+    // Phone number validation
+    if (built.profile.phone) {
+      const phoneDigits = built.profile.phone.replace(/[^0-9]/g, "");
+      if (phoneDigits.length < 7 || phoneDigits.length > 15 || /[a-zA-Z]/.test(built.profile.phone)) {
+        return res.status(400).json({ error: "Phone number must contain only numbers." });
+      }
+    }
+
     req.user.profile = built.profile;
 
     if (req.body.newPassword) {

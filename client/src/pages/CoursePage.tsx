@@ -3,6 +3,7 @@ import type { Asset, Course, CourseProgress, Lesson } from "../types";
 import { api } from "../api/client";
 import { formatBytes, modulesOf } from "../data/constants";
 import QuizPanel from "../components/QuizPanel";
+import { useToast } from "../context/ToastContext";
 
 const lessonIcon = (type: Lesson["type"]) => (type === "video" ? "▶" : type === "quiz" ? "?" : type === "document" ? "▤" : "⌘");
 
@@ -23,6 +24,9 @@ export default function CoursePage({
   const [tab, setTab] = useState<"overview" | "resources" | "notes">("overview");
   const [videoSrc, setVideoSrc] = useState("");
   const [busy, setBusy] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [noteSaved, setNoteSaved] = useState("");
+  const { success, error } = useToast();
 
   // A course ships its own modules; the bundled outline is only a fallback for a
   // demo/starter card that never reached the server.
@@ -171,8 +175,9 @@ export default function CoursePage({
             {tab === "notes" && (
               <div className="notes-panel">
                 <h2>Private notes</h2>
-                <textarea aria-label="Private lesson notes" placeholder="Write a takeaway, code snippet, or reminder…" />
-                <div><small>Notes remain private to your learning workspace.</small><button className="primary-small">Save note</button></div>
+                <textarea aria-label="Private lesson notes" placeholder="Write a takeaway, code snippet, or reminder…" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
+                <div><small>Notes remain private to your learning workspace.</small><button className="primary-small" type="button" onClick={() => { if (noteText.trim()) { try { localStorage.setItem("lms_note_" + course.slug + "_" + (activeLesson?.key || lesson), noteText); setNoteSaved("Note saved!"); setTimeout(function(){ setNoteSaved(""); }, 2000); } catch(e){} success("Note saved", "Your private note has been saved."); } else { error("Save failed", "Please write something before saving."); } }}>Save note</button></div>
+                {noteSaved ? <small style={{ color: "var(--green)" }}>{noteSaved}</small> : null}
               </div>
             )}
           </>

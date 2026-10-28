@@ -4,13 +4,8 @@ import { api } from "../../api/client";
 import CourseFields, { readCourseForm } from "../../components/CourseFields";
 import CurriculumBuilder from "../../components/CurriculumBuilder";
 import type { Asset, Course, View } from "../../types";
+import { useToast } from "../../context/ToastContext";
 
-/**
- * The teacher's own courses only. The list comes from GET /courses/mine,
- * which the server scopes to the caller's email, so this page never shows
- * another instructor's courses. Mutations also mirror into the shared catalog
- * state so the rest of the app stays in sync.
- */
 export default function TeacherCourses({
   setCourses,
   assets,
@@ -26,9 +21,11 @@ export default function TeacherCourses({
 }) {
   const [courses, setMyCourses] = useState<Course[] | null>(null);
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [curriculumSlug, setCurriculumSlug] = useState<string | null>(null);
+  const { success, error } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +35,10 @@ export default function TeacherCourses({
         if (!cancelled) setMyCourses(courses);
       })
       .catch((err) => {
-        if (!cancelled) setStatus(err instanceof Error ? err.message : "Unable to load your courses.");
+        if (!cancelled) {
+          setStatus(err instanceof Error ? err.message : "Unable to load your courses.");
+          error("Load failed", err instanceof Error ? err.message : "Unable to load your courses.");
+        }
       });
     return () => {
       cancelled = true;
@@ -56,15 +56,19 @@ export default function TeacherCourses({
       setStatus("Course title is required.");
       return;
     }
-    setStatus("Creating course…");
+    setBusy(true);
     try {
       const { course } = await api.createCourse(values);
       setMyCourses((cur) => [course, ...(cur ?? [])]);
       setCourses((cur) => [course, ...cur]);
       setCreating(false);
       setStatus(`Course “${course.title}” is live. Upload content from the Content studio.`);
-    } catch (err) {
+      success("Course created", `“${course.title}” has been published.`);
+    } catch (err: any) {
       setStatus(err instanceof Error ? err.message : "Course creation failed.");
+      error("Create failed", err instanceof Error ? err.message : "Course creation failed.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -72,28 +76,36 @@ export default function TeacherCourses({
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const id = String(data.get("id") ?? "");
-    setStatus("Saving changes…");
+    setBusy(true);
     try {
       const { course } = await api.updateCourse(id, readCourseForm(data));
       setMyCourses((cur) => (cur ?? []).map((item) => (item.slug === course.slug ? course : item)));
       setCourses((cur) => cur.map((item) => (item.slug === course.slug || item._id === course._id ? course : item)));
       setEditingSlug(null);
       setStatus(`Course “${course.title}” was updated.`);
-    } catch (err) {
+      success("Course updated", `“${course.title}” has been revised.`);
+    } catch (err: any) {
       setStatus(err instanceof Error ? err.message : "Course update failed.");
+      error("Update failed", err instanceof Error ? err.message : "Course update failed.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleDelete(course: Course) {
     if (!window.confirm(`Delete “${course.title}” from the catalog?`)) return;
-    setStatus("Deleting course…");
+    setBusy(true);
     try {
       await api.deleteCourse(course._id ?? course.slug);
       setMyCourses((cur) => (cur ?? []).filter((item) => item.slug !== course.slug));
       setCourses((cur) => cur.filter((item) => item.slug !== course.slug && item._id !== course._id));
       setStatus(`Course “${course.title}” was deleted.`);
-    } catch (err) {
+      success("Course deleted", `“${course.title}” has been removed.`);
+    } catch (err: any) {
       setStatus(err instanceof Error ? err.message : "Course deletion failed.");
+      error("Delete failed", err instanceof Error ? err.message : "Course deletion failed.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -101,6 +113,7 @@ export default function TeacherCourses({
     setMyCourses((cur) => (cur ?? []).map((item) => (item.slug === course.slug ? course : item)));
     setCourses((cur) => cur.map((item) => (item.slug === course.slug || item._id === course._id ? course : item)));
     setStatus(`Curriculum for “${course.title}” saved.`);
+    success("Curriculum saved", `Curriculum for “${course.title}” has been updated.`);
   }
 
   return (
@@ -132,7 +145,7 @@ export default function TeacherCourses({
             <h2>{courses === null ? "Loading…" : `${courses.length} ${courses.length === 1 ? "course" : "courses"} in your portal`}</h2>
           </div>
           <button className="text-button" type="button" onClick={() => goTo("teacher")}>
-            ← Dashboard
+            → Dashboard
           </button>
         </div>
 
@@ -178,8 +191,12 @@ export default function TeacherCourses({
         </div>
 
         <div className="management-links">
-          <button className="outline-small" type="button" onClick={() => goTo("admin")}>Upload content for these courses →</button>
-          <button className="outline-small" type="button" onClick={() => goTo("profile")}>Update your profile →</button>
+          <button className="outline-small" type="button" onClick={() => goTo("admin")}>
+            Upload content for these courses →
+          </button>
+          <button className="outline-small" type="button" onClick={() => goTo("profile")}>
+            Update your profile →
+          </button>
         </div>
       </section>
 

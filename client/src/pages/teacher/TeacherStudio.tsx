@@ -11,23 +11,26 @@ export default function TeacherStudio({
   assets,
   setAssets,
   goTo,
+  search = "",
 }: {
   courses: Course[];
   assets: Asset[];
   setAssets: React.Dispatch<React.SetStateAction<Asset[]>>;
   goTo: (view: View) => void;
+  search?: string;
 }) {
   const { user } = useAuth();
 
   // The portal is unique per teacher: only courses they own and only resources
   // they uploaded. Everything else stays invisible rather than read-only.
+  const q = search.toLowerCase();
   const myCourses = useMemo(
-    () => (user ? courses.filter((course) => course.createdBy === user.email) : []),
-    [courses, user]
+    () => (user ? courses.filter((course) => course.createdBy === user.email && (!q || course.title.toLowerCase().includes(q) || course.category.toLowerCase().includes(q))) : []),
+    [courses, user, q]
   );
   const myUploads = useMemo(
-    () => (user ? assets.filter((asset) => asset.createdBy === user.email) : []),
-    [assets, user]
+    () => (user ? assets.filter((asset) => asset.createdBy === user.email && (!q || asset.title.toLowerCase().includes(q))) : []),
+    [assets, user, q]
   );
 
   const totalBytes = useMemo(() => myUploads.reduce((sum, a) => sum + (a.size || 0), 0), [myUploads]);

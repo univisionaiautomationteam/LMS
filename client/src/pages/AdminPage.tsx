@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { BookOpen, Building2, GraduationCap, Layers, Library, MapPinned, Users } from "lucide-react";
 import { api, courseAuthorLabel } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import type { Asset, AuthUser, College, Course } from "../types";
 import { INDIA_STATES } from "../data/constants";
 import AdminStudentMap from "../components/AdminStudentMap";
@@ -34,6 +35,7 @@ export default function AdminPage({
   setAssets,
   colleges,
   setColleges,
+  search = "",
 }: {
   courses: Course[];
   setCourses: React.Dispatch<React.SetStateAction<Course[]>>;
@@ -41,11 +43,13 @@ export default function AdminPage({
   setAssets: React.Dispatch<React.SetStateAction<Asset[]>>;
   colleges: College[];
   setColleges: React.Dispatch<React.SetStateAction<College[]>>;
+  search?: string;
 }) {
   const { user } = useAuth();
   const [adminView, setAdminView] = useState<AdminView>("overview");
   const [status, setStatus] = useState("");
   const [collegeStatus, setCollegeStatus] = useState("");
+  const [deleteCollegeId, setDeleteCollegeId] = useState("");
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [users, setUsers] = useState<AuthUser[]>([]);
@@ -61,6 +65,7 @@ export default function AdminPage({
   const [showCollegeForm, setShowCollegeForm] = useState(false);
   const [structureCollegeId, setStructureCollegeId] = useState<string | null>(null);
   const [pushTargets, setPushTargets] = useState<Record<string, boolean>>({});
+  const { success, error } = useToast();
 
   // Super admin runs the whole platform (creates colleges, courses, assets);
   // a college admin runs only their own college (people, departments, access).
@@ -77,7 +82,8 @@ export default function AdminPage({
 
   const selectedCollege = colleges.find((c) => c._id === selectedCollegeId) ?? colleges[0];
   const selectedDepartment = selectedCollege?.departments.find((d) => d._id === selectedDepartmentId) ?? selectedCollege?.departments[0];
-  const directoryUsers = users.filter((u) => u.role !== "admin");
+  const q = search.toLowerCase();
+  const directoryUsers = users.filter((u) => u.role !== "admin" && (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.department || "").toLowerCase().includes(q)));
   const locatedStudents = directoryUsers.filter((u) => u.role === "student" && u.profile?.complete && u.profile.state);
   const structureCollege = colleges.find((c) => c._id === structureCollegeId) ?? null;
   const students = directoryUsers.filter((u) => u.role === "student");
@@ -85,12 +91,14 @@ export default function AdminPage({
   const totalDepartments = colleges.reduce((n, c) => n + c.departments.length, 0);
   // Super admin manages the whole catalog; a college admin only the courses their
   // own teachers created (assets in those courses are what they can edit).
-  const contentCourses = isAdmin
+  const contentCourses = (isAdmin
     ? courses
     : courses.filter((c) => {
         const owner = users.find((u) => u.email === c.createdBy);
         return owner && String(owner.collegeId ?? "") === String(user?.collegeId ?? "");
-      });
+      })).filter((c) => !q || c.title.toLowerCase().includes(q) || c.category.toLowerCase().includes(q));
+
+  const filteredColleges = colleges.filter((c) => !q || c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q));
 
   useEffect(() => {
     setDomainsDraft((selectedCollege?.domains ?? []).join(", "));
@@ -127,10 +135,13 @@ export default function AdminPage({
         }
       }
       setStatus(pushed ? `Course “${course.title}” is live and pushed to ${pushed} department(s).` : `Course “${course.title}” is live.`);
+      success("Course created", `“${course.title}” has been published.`);
       formEl.reset();
       setPushTargets({});
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Course creation failed.");
+      const msg = err instanceof Error ? err.message : "Course creation failed.";
+      setStatus(msg);
+      error("Create failed", msg);
     }
   }
 
@@ -164,10 +175,13 @@ export default function AdminPage({
       });
       setUsers((cur) => [created, ...cur]);
       setStatus(`Login created for ${created.name} (${created.email}).`);
+      success("User created", `Login created for ${created.name} (${created.email}).`);
       formEl.reset();
       setUserCollegeId("");
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Account creation failed.");
+      const msg = err instanceof Error ? err.message : "Account creation failed.";
+      setStatus(msg);
+      error("Create failed", msg);
     }
   }
 
@@ -195,10 +209,13 @@ export default function AdminPage({
           ? `${college.name} created with college admin ${admin.email}. Now add its first department.`
           : `${college.name} created. Now add its first department.`
       );
+      success("College created", `${college.name} has been added.`);
       formEl.reset();
       setShowCollegeForm(false);
     } catch (err) {
-      setCollegeStatus(err instanceof Error ? err.message : "Unable to create college.");
+      const msg = err instanceof Error ? err.message : "Unable to create college.";
+      setCollegeStatus(msg);
+      error("Create failed", msg);
     }
   }
 
@@ -217,9 +234,12 @@ export default function AdminPage({
       const created = college.departments.find((d: { code: string }) => d.code === String(form.get("departmentCode")).toUpperCase());
       setSelectedDepartmentId(created?._id ?? "");
       setCollegeStatus(`${form.get("departmentName")} created. Assign its courses.`);
+      success("Department created", `${form.get("departmentName")} has been added.`);
       formEl.reset();
     } catch (err) {
-      setCollegeStatus(err instanceof Error ? err.message : "Unable to create department.");
+      const msg = err instanceof Error ? err.message : "Unable to create department.";
+      setCollegeStatus(msg);
+      error("Create failed", msg);
     }
   }
 
@@ -236,8 +256,11 @@ export default function AdminPage({
       });
       setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
       setCollegeStatus(`${selectedDepartment.name} students can access ${allowedCourseIds.length} courses.`);
+      success("Access saved", `Course access updated for ${selectedDepartment.name}.`);
     } catch (err) {
-      setCollegeStatus(err instanceof Error ? err.message : "Unable to save college access.");
+      const msg = err instanceof Error ? err.message : "Unable to save college access.";
+      setCollegeStatus(msg);
+      error("Save failed", msg);
     }
   }
 
@@ -250,8 +273,11 @@ export default function AdminPage({
       setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
       setDomainsDraft((college.domains ?? []).join(", "));
       setDomainsStatus(college.domains.length ? `Saved ${college.domains.length} domain(s).` : "Domains cleared.");
+      success("Domains saved", `Email domains updated for ${selectedCollege.name}.`);
     } catch (err) {
-      setDomainsStatus(err instanceof Error ? err.message : "Unable to save domains.");
+      const msg = err instanceof Error ? err.message : "Unable to save domains.";
+      setDomainsStatus(msg);
+      error("Save failed", msg);
     }
   }
 
@@ -311,10 +337,13 @@ export default function AdminPage({
         defaultPassword
       );
       setBulkStatus(`${result.created} created · ${result.updated} updated · ${result.rejected.length} rejected.`);
+      success("Bulk import complete", `${result.created} created, ${result.updated} updated, ${result.rejected.length} rejected.`);
       setBulkRows([]);
       api.listUsers().then(({ users }) => setUsers(users)).catch(() => {});
     } catch (err) {
-      setBulkStatus(err instanceof Error ? err.message : "Bulk import failed.");
+      const msg = err instanceof Error ? err.message : "Bulk import failed.";
+      setBulkStatus(msg);
+      error("Import failed", msg);
     }
   }
 
@@ -339,8 +368,11 @@ export default function AdminPage({
       setCourses((items) => items.map((c) => (c.slug === course.slug || c._id === course._id ? course : c)));
       setEditingCourseId(null);
       setStatus(`Course “${course.title}” was updated.`);
+      success("Course updated", `“${course.title}” has been revised.`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Course update failed.");
+      const msg = err instanceof Error ? err.message : "Course update failed.";
+      setStatus(msg);
+      error("Update failed", msg);
     }
   }
 
@@ -350,8 +382,31 @@ export default function AdminPage({
       await api.deleteCourse(id);
       setCourses((items) => items.filter((c) => c._id !== id && c.slug !== id));
       setStatus("Course deleted.");
+      success("Course deleted", "The course has been removed from the catalog.");
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Course deletion failed.");
+      const msg = err instanceof Error ? err.message : "Course deletion failed.";
+      setStatus(msg);
+      error("Delete failed", msg);
+    }
+  }
+
+  async function handleDeleteCollege(id: string) {
+    try {
+      await api.deleteCollege(id);
+      setColleges((cur) => cur.filter((c) => c._id !== id));
+      setDeleteCollegeId("");
+      setCollegeStatus("College deleted.");
+      success("College deleted", "The college has been removed.");
+      if (selectedCollegeId === id) {
+        setSelectedCollegeId("");
+        setSelectedDepartmentId("");
+        setStructureCollegeId(null);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "College deletion failed.";
+      setDeleteCollegeId("");
+      setCollegeStatus(msg);
+      error("Delete failed", msg);
     }
   }
 
@@ -361,8 +416,11 @@ export default function AdminPage({
       await api.deleteUser(authUser._id);
       setUsers((cur) => cur.filter((u) => u._id !== authUser._id));
       setStatus(`${authUser.name}'s account was deleted.`);
+      success("User deleted", `${authUser.name}'s account has been removed.`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "User deletion failed.");
+      const msg = err instanceof Error ? err.message : "User deletion failed.";
+      setStatus(msg);
+      error("Delete failed", msg);
     }
   }
 
@@ -373,8 +431,11 @@ export default function AdminPage({
       const { user: updated } = await api.assignUserDepartment(authUser._id, { departmentId, department });
       setUsers((cur) => cur.map((u) => (u._id === updated._id ? updated : u)));
       setStatus(`${updated.name} moved to ${department || "no department"}.`);
+      success("Department updated", `${updated.name} moved to ${department || "no department"}.`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Unable to move this account.");
+      const msg = err instanceof Error ? err.message : "Unable to move this account.";
+      setStatus(msg);
+      error("Update failed", msg);
     }
   }
 
@@ -447,22 +508,35 @@ export default function AdminPage({
             <button className="primary-button" type="button" onClick={() => setShowCollegeForm(true)}>＋ Add college</button>
           </div>
           <div className="college-cards">
-            {colleges.map((college) => {
+            {filteredColleges.map((college) => {
               const cTeachers = users.filter((u) => u.role === "teacher" && String(u.collegeId) === String(college._id)).length;
               const cStudents = users.filter((u) => u.role === "student" && String(u.collegeId) === String(college._id)).length;
               return (
-                <button
-                  type="button"
+                <div
                   key={college._id}
                   className={`college-card ${selectedCollege?._id === college._id ? "selected" : ""}`}
                   onClick={() => { setSelectedCollegeId(college._id); setSelectedDepartmentId(""); setStructureCollegeId(college._id); }}
+                  style={{ cursor: "pointer" }}
                 >
                   <div className="college-card-head"><span className="pill">{college.code}</span><em className={college.active ? "is-active" : "is-paused"}>{college.active ? "Active" : "Paused"}</em></div>
                   <strong>{college.name}</strong>
                   <small>{college.state || "—"} · {college.domains?.length ? college.domains.join(", ") : "no domains"}</small>
                   <div className="college-card-stats"><em>{college.departments.length} depts</em><em>{cTeachers} teachers</em><em>{cStudents} students</em></div>
                   <span className="college-card-cta">View structure →</span>
-                </button>
+                  {isAdmin && (
+                    <div className="college-card-actions">
+                      <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); setSelectedCollegeId(college._id); setAdminView("departments"); }}>Edit</button>
+                      <button className="danger-link" type="button" onClick={(e) => { e.stopPropagation(); setDeleteCollegeId(college._id); }}>Delete</button>
+                    </div>
+                  )}
+                  {deleteCollegeId === college._id && (
+                    <div className="college-card-confirm">
+                      <p>Delete “{college.name}”? This cannot be undone.</p>
+                      <button className="danger-button" type="button" onClick={(e) => { e.stopPropagation(); handleDeleteCollege(college._id); }}>Yes, delete</button>
+                      <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); setDeleteCollegeId(""); }}>Cancel</button>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

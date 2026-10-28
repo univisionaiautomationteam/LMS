@@ -138,6 +138,8 @@ export const api = {
       { method: "POST", body: JSON.stringify({ language, code, stdin }) }
     ),
 
+  deleteCollege: (id: string) => request<{ ok: boolean }>(`/colleges/${id}`, { method: "DELETE" }),
+
   dashboard: () =>
     request<{ students: number; teachers: number; courses: number; assets: number; mapped: number }>("/dashboard"),
 };
@@ -149,25 +151,56 @@ export const api = {
  * bearer token is attached. The local fallback proxies through the API instead
  * and therefore does need the token.
  */
-export async function uploadFile(ticket: UploadTicket, file: File): Promise<void> {
-  if (ticket.mode === "s3") {
-    const body = new FormData();
-    for (const [key, value] of Object.entries(ticket.fields ?? {})) body.append(key, value);
-    body.append("file", file);
-    const response = await fetch(ticket.uploadUrl, { method: "POST", body });
-    if (!response.ok) throw new Error(`Storage rejected the upload (${response.status}).`);
-    return;
-  }
+export async function uploadFile(ticket: UploadTicket, file: File, onProgress?: (percent: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
 
-  const response = await fetch(ticket.uploadUrl, {
-    method: "PUT",
-    body: file,
-    headers: {
-      "content-type": file.type || "application/octet-stream",
-      ...(getToken() ? { authorization: `Bearer ${getToken()}` } : {}),
-    },
+    if (ticket.mode === "s3") {
+      const body = new FormData();
+      for (const [key, value] of Object.entries(ticket.fields ?? {})) body.append(key, value);
+      body.append("file", file);
+
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable && onProgress) {
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      });
+
+      xhr.open("POST", ticket.uploadUrl, true);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(`Storage rejected the upload (${xhr.status}).`));
+        }
+      };
+      xhr.onerror = () => reject(new Error("Upload failed: network error."));
+      xhr.ontimeout = () => reject(new Error("Upload timed out."));
+      xhr.send(body);
+      return;
+    }
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    });
+
+    xhr.open("PUT", ticket.uploadUrl, true);
+    xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+    const token = getToken();
+    if (token) xhr.setRequestHeader("authorization", `Bearer ${token}`);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`Upload failed (${xhr.status}).`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed: network error."));
+    xhr.ontimeout = () => reject(new Error("Upload timed out."));
+    xhr.send(file);
   });
-  if (!response.ok) throw new Error(`Upload failed (${response.status}).`);
 }
 
 export function roleLabel(role: UserRole): string {

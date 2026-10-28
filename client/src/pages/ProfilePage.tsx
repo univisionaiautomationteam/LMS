@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api, roleLabel } from "../api/client";
+import { useToast } from "../context/ToastContext";
 import { INDIA_STATES } from "../data/constants";
 import TeacherProfileFields from "../components/profile/TeacherProfileFields";
 import StudentProfileFields from "../components/profile/StudentProfileFields";
@@ -8,7 +9,9 @@ import StudentProfileFields from "../components/profile/StudentProfileFields";
 export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
   const { user, setUser } = useAuth();
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const profile = user?.profile;
+  const { success, error } = useToast();
 
   if (!user) return null;
 
@@ -34,7 +37,8 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
 
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setStatus("Saving your profile…");
+    setBusy(true);
+    setStatus("");
     const form = new FormData(e.currentTarget);
     const payload: Record<string, unknown> = {
       collegeName: String(form.get("collegeName") ?? "").trim(),
@@ -45,9 +49,6 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
       phone: String(form.get("phone") ?? "").trim(),
       about: String(form.get("about") ?? "").trim(),
     };
-    // Each role only posts its own detail fields; the server drops anything
-    // outside the role's allowlist, but posting blank student fields as a
-    // teacher would just be noise. A college admin has no role-detail fields.
     if (isTeacher) {
       payload["designation"] = String(form.get("designation") ?? "").trim();
       payload["qualification"] = String(form.get("qualification") ?? "").trim();
@@ -63,7 +64,9 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
     const password = String(form.get("newPassword") ?? "");
     const confirm = String(form.get("confirmPassword") ?? "");
     if (password && password !== confirm) {
+      setBusy(false);
       setStatus("The new passwords do not match.");
+      error("Save failed", "The new passwords do not match.");
       return;
     }
     if (password) {
@@ -74,15 +77,18 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
       const { user: updated } = await api.updateProfile(payload);
       setUser(updated);
       setStatus("Profile saved successfully.");
+      success("Profile saved", "Your profile has been updated successfully.");
       onSaved();
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Unable to save your profile.");
+    } catch (err: any) {
+      const msg = err?.message ?? "Unable to save your profile.";
+      setStatus(msg);
+      error("Save failed", msg);
+    } finally {
+      setBusy(false);
     }
   }
 
   const lockedCollegeName = user.collegeNameLocked ? (user.profile?.collegeName ?? "") : "";
-  // A teacher/student's department is owned by the college admin (top-level
-  // assignment); a college admin simply stores their own on the profile.
   const department = isCollegeAdmin
     ? profile?.department ?? ""
     : user.department || profile?.department || "";
@@ -134,7 +140,7 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
           </div>
           <div className="form-row">
             <label>PIN code<input name="pincode" inputMode="numeric" pattern="[0-9]{6}" defaultValue={profile?.pincode} placeholder="6-digit PIN code" /></label>
-            <label>Phone number<input name="phone" type="tel" required defaultValue={profile?.phone} placeholder="Contact number" /></label>
+            <label>Phone number<input name="phone" type="tel" inputMode="numeric" pattern="[0-9+\-\s()]{7,15}" required defaultValue={profile?.phone} placeholder="Contact number (numbers only)" /></label>
           </div>
         </section>
         <section className="profile-form-section">
@@ -144,7 +150,9 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
         {status && <p className="profile-status" role="status">{status}</p>}
         <div className="profile-form-actions">
           <button className="text-button" type="button" onClick={onSaved}>Cancel</button>
-          <button className="primary-button" type="submit">Save profile <span>→</span></button>
+          <button className="primary-button" type="submit" disabled={busy}>
+            {busy ? "Saving…" : "Save profile <span>→</span>"}
+          </button>
         </div>
       </form>
     </div>

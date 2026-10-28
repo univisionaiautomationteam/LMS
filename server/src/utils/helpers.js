@@ -183,6 +183,14 @@ export function buildProfile(values = {}, current = {}, role = "student", locked
     details[key] = String(merged[key] ?? "").trim();
   }
 
+  // Basic phone validation - must contain only digits and common separators
+  if (shared.phone) {
+    const phoneDigits = shared.phone.replace(/[^0-9]/g, "");
+    if (phoneDigits.length < 7 || phoneDigits.length > 15 || /[a-zA-Z]/.test(shared.phone)) {
+      // Will be caught as invalid format; return it but let caller handle
+    }
+  }
+
   const flat = { ...shared, ...details };
   const missing = missingProfileField(flat, role);
 

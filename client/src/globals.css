@@ -148,6 +148,11 @@ a { text-decoration: none; color: inherit; }
 .top-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .notification-button { position: relative; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-2); background: var(--surface-2); }
 .notification-button i { position: absolute; top: 8px; right: 9px; width: 7px; height: 7px; background: var(--red); border-radius: 50%; }
+.notification-wrapper { position: relative; display: inline-block; }
+.notifications-panel { position: absolute; top: 44px; right: 0; width: 260px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); z-index: 50; padding: 12px; }
+.notifications-panel h3 { font-size: 0.9rem; margin: 0 0 8px; color: var(--text-1); }
+.notifications-panel p { font-size: 0.82rem; color: var(--text-2); margin: 0 0 10px; }
+.notifications-panel button { font-size: 0.82rem; padding: 4px 10px; }
 .top-profile-button { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 10px; }
 .top-profile-button:hover { background: var(--surface-2); }
 .top-profile-button b {
@@ -157,6 +162,15 @@ a { text-decoration: none; color: inherit; }
 .top-profile-button strong { font-size: 0.85rem; display: block; text-align: left; }
 .top-profile-button small { color: var(--text-3); font-size: 0.72rem; text-transform: capitalize; }
 .create-top-button { font-weight: 700; }
+
+.upload-progress { margin: 12px 0 8px; font-size: 0.82rem; color: var(--text-2); }
+.upload-progress-bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-bottom: 4px; }
+.upload-progress-bar > div { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.2s ease; }
+.upload-progress-text { display: block; text-align: right; font-weight: 600; color: var(--text-1); }
+.file-selected { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; }
+.file-selected span { color: var(--text-1); }
+.file-remove { background: none; border: none; color: var(--red); font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 0 4px; }
+.file-remove:hover { color: var(--red-dark, var(--red)); background: var(--red-light, rgba(231, 76, 60, 0.1)); border-radius: 4px; }
 
 /* ---------------- Page content ---------------- */
 .page-content { padding: 28px; max-width: 1180px; margin: 0 auto; }
@@ -615,7 +629,7 @@ a { text-decoration: none; color: inherit; }
 .publish-checklist h2 { font-size: 1.05rem; margin-bottom: 14px; }
 .publish-checklist > div { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .publish-checklist > div:last-child { border: none; }
-.publish-checklist > div > span { color: var(--border); font-weight: 800; }
+.publish-checklist > div > span { color: var(--text-2); font-weight: 800; }
 .publish-checklist p strong { display: block; font-size: 0.88rem; }
 .publish-checklist p small { color: var(--text-2); font-size: 0.78rem; }
 

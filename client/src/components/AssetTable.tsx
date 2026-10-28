@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import type { Asset, Course } from "../types";
 import { formatBytes } from "../data/constants";
+import { useToast } from "../context/ToastContext";
 
 export default function AssetTable({
   assets,
@@ -14,7 +15,6 @@ export default function AssetTable({
 }: {
   assets: Asset[];
   courses: Course[];
-  /** Rows the viewer may edit or delete. Omit to allow everything shown. */
   canManage?: (asset: Asset) => boolean;
   onUpdated?: (asset: Asset) => void;
   onDeleted?: (asset: Asset) => void;
@@ -23,10 +23,10 @@ export default function AssetTable({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
+  const { success, error } = useToast();
 
   async function open(asset: Asset) {
     try {
-      // Private buckets hand out short-lived URLs, so resolve one per click.
       const url = asset.objectKey ? (await api.assetUrl(asset._id)).url : asset.url;
       if (!url) {
         setStatus("This item has no stored file.");
@@ -34,7 +34,9 @@ export default function AssetTable({
       }
       window.open(url, "_blank", "noopener");
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Could not open that file.");
+      const msg = err instanceof Error ? err.message : "Could not open that file.";
+      setStatus(msg);
+      error("Open failed", msg);
     }
   }
 
@@ -48,9 +50,12 @@ export default function AssetTable({
       });
       setEditingId(null);
       setStatus(`Updated “${asset.title}”.`);
+      success("Asset updated", `“${asset.title}” has been saved.`);
       onUpdated?.(asset);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Update failed.");
+      const msg = err instanceof Error ? err.message : "Update failed.";
+      setStatus(msg);
+      error("Update failed", msg);
     }
   }
 
@@ -59,9 +64,12 @@ export default function AssetTable({
     try {
       await api.deleteAsset(asset._id);
       setStatus("Content deleted.");
+      success("Asset deleted", `“${asset.title}” has been removed.`);
       onDeleted?.(asset);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Delete failed.");
+      const msg = err instanceof Error ? err.message : "Delete failed.";
+      setStatus(msg);
+      error("Delete failed", msg);
     }
   }
 
@@ -112,18 +120,18 @@ export default function AssetTable({
           );
         }
         return (
-          <div className="asset-row" key={asset._id}>
-            <span>
+          <div className="asset-row" key={asset._id} style={{ alignItems: "center" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <i className={asset.kind}>{asset.kind === "video" ? "▶" : "DOC"}</i>
               <strong>{asset.title}</strong>
             </span>
             <span>{courses.find((c) => c.slug === asset.course)?.title ?? asset.course}</span>
-            <span>{asset.kind}</span>
+            <span style={{ textTransform: "capitalize" }}>{asset.kind}</span>
             <span>{formatBytes(asset.size)}</span>
-            <span className="asset-actions">
-              <button type="button" onClick={() => open(asset)}>Open</button>
-              {manageable && <button type="button" onClick={() => setEditingId(asset._id)}>Edit</button>}
-              {manageable && <button className="danger-link" type="button" onClick={() => remove(asset)}>Delete</button>}
+            <span className="asset-actions" style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" onClick={() => open(asset)} style={{ padding: "4px 8px" }}>Open</button>
+              {manageable && <button type="button" onClick={() => setEditingId(asset._id)} style={{ padding: "4px 8px" }}>Edit</button>}
+              {manageable && <button className="danger-link" type="button" onClick={() => remove(asset)} style={{ padding: "4px 8px" }}>Delete</button>}
             </span>
           </div>
         );

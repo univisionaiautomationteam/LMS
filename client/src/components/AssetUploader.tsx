@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, uploadFile } from "../api/client";
 import type { Asset, Course } from "../types";
+import { useToast } from "../context/ToastContext";
 
 // Keep in step with MAX_UPLOAD_BYTES on the server (1 GB).
 const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
@@ -19,12 +20,15 @@ export default function AssetUploader({
 }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const { success, error } = useToast();
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formElement = e.currentTarget;
     const form = new FormData(formElement);
-    const file = form.get("file");
+    const file = selectedFile;
     if (!(file instanceof File) || !file.size) {
       setStatus("Choose a file to upload.");
       return;
@@ -38,7 +42,17 @@ export default function AssetUploader({
     const course = String(form.get("course") ?? "").trim();
     const kind = String(form.get("kind") ?? "video");
 
+    if (!assetTitle) {
+      setStatus("Content title is required.");
+      return;
+    }
+    if (!course) {
+      setStatus("Please select a course.");
+      return;
+    }
+
     setBusy(true);
+    setProgress(0);
     try {
       setStatus("Requesting a secure upload slot…");
       const ticket = await api.createUploadTicket({
@@ -51,7 +65,7 @@ export default function AssetUploader({
       });
 
       setStatus(`Uploading ${file.name}…`);
-      await uploadFile(ticket, file);
+      await uploadFile(ticket, file, (pct) => setProgress(pct));
 
       // The asset row is only created once the bytes are safely in storage.
       const { asset } = await api.createAsset({
@@ -65,9 +79,15 @@ export default function AssetUploader({
       });
       onUploaded(asset);
       formElement.reset();
+      setSelectedFile(null);
+      setProgress(100);
       setStatus("Published to the course library.");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Upload failed.");
+      success("Upload complete", `“${assetTitle}” has been published.`);
+    } catch (err: any) {
+      setProgress(0);
+      const msg = err?.message ?? "Upload failed.";
+      setStatus(msg);
+      error("Upload failed", msg);
     } finally {
       setBusy(false);
     }
@@ -109,12 +129,41 @@ export default function AssetUploader({
         <input
           name="file"
           type="file"
-          required
           accept="video/mp4,video/webm,application/pdf,text/plain,.doc,.docx"
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            setSelectedFile(f);
+            setStatus("");
+          }}
         />
-        <span>Choose a video or document</span>
+        {selectedFile ? (
+          <div className="file-selected">
+            <span>📄 {selectedFile.name}</span>
+            <button
+              type="button"
+              className="file-remove"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSelectedFile(null);
+                setStatus("");
+              }}
+              aria-label="Remove selected file"
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <span>Choose a video or document</span>
+        )}
         <small>MP4, WebM, PDF, TXT, DOC or DOCX · up to {MAX_UPLOAD_LABEL}</small>
       </label>
+      {progress > 0 && progress < 100 && (
+        <div className="upload-progress">
+          <div className="upload-progress-bar" style={{ width: `${progress}%` }} />
+          <span className="upload-progress-text">{progress}%</span>
+        </div>
+      )}
       <button className="primary-button" type="submit" disabled={busy}>
         {busy ? "Uploading…" : "Upload & publish"}
         {!busy && <span>→</span>}

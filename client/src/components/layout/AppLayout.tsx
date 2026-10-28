@@ -34,6 +34,7 @@ export default function AppLayout() {
   const [summary, setSummary] = useState<ProgressSummary | null>(null);
   const [search, setSearch] = useState("");
   const [courseId, setCourseId] = useState("python");
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   // In-app back stack. Every navigation pushes the page we are leaving (view +
   // the course it was showing), so the back button steps one page back for
@@ -135,7 +136,17 @@ export default function AppLayout() {
 
   /** Step one page back; if there is nothing behind us, fall back to the role's home. */
   function goBack() {
-    if (!history.length) return;
+    if (!history.length) {
+      // If no history, go to role-appropriate home/dashboard
+      if (user?.role === "teacher") {
+        setView("teacher");
+      } else if (isAdminLike) {
+        setView("admin");
+      } else {
+        setView("home");
+      }
+      return;
+    }
     const prev = history[history.length - 1];
     setHistory((h) => h.slice(0, -1));
     const courseGone = prev.view === "course" && !availableCourses.some((c) => c.slug === prev.courseId);
@@ -220,11 +231,20 @@ export default function AppLayout() {
             <kbd>⌘ K</kbd>
           </div>
           <div className="top-actions">
-            <button className="notification-button" aria-label="Notifications"><Bell size={17} /><i /></button>
-            {user.role === "admin" && (
-              <button className="primary-small create-top-button" onClick={() => navigate("admin")}><span>＋</span>Create course</button>
-            )}
-            {user.role === "teacher" && (
+            <div className="notification-wrapper">
+              <button className="notification-button" aria-label="Notifications" onClick={() => setNotificationsOpen(!notificationsOpen)}>
+                <Bell size={17} />
+                <i />
+              </button>
+              {notificationsOpen && (
+                <div className="notifications-panel">
+                  <h3>Notifications</h3>
+                  <p>No new notifications.</p>
+                  <button className="text-button" type="button" onClick={() => setNotificationsOpen(false)}>Close</button>
+                </div>
+              )}
+            </div>
+            {user.role === "teacher" && view !== "teacherCourses" && (
               <button className="primary-small create-top-button" onClick={() => navigate("teacherCourses")}><span>＋</span>Create course</button>
             )}
             <button className="top-profile-button" onClick={() => navigate("profile")} aria-label={`Open ${user.name} profile`}>
@@ -257,7 +277,7 @@ export default function AppLayout() {
         )}
         {view === "admin" &&
           (user.role === "teacher" ? (
-            <TeacherStudio courses={courses} assets={assets} setAssets={setAssets} goTo={navigate} />
+            <TeacherStudio courses={courses} assets={assets} setAssets={setAssets} goTo={navigate} search={search} />
           ) : (
             <AdminPage
               courses={courses}
@@ -266,6 +286,7 @@ export default function AppLayout() {
               setAssets={setAssets}
               colleges={colleges}
               setColleges={setColleges}
+              search={search}
             />
           ))}
       </section>
