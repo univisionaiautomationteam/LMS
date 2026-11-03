@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { api } from "../api/client";
-import { useToast } from "../context/ToastContext";
+import { usePopup } from "../context/PopupContext";
 
 /**
  * Wraps an async API call with toast notifications.
@@ -8,7 +8,7 @@ import { useToast } from "../context/ToastContext";
  * Re-throws the error so callers can still handle it if needed.
  */
 export function useApi() {
-  const { success, error } = useToast();
+  const { success, error } = usePopup();
 
   const call = useCallback(
     async <T,>(
