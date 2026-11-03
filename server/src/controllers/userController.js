@@ -1,6 +1,9 @@
 import bcrypt from "bcryptjs";
-import { User } from "../models/User.js";
-import { College } from "../models/College.js";
+import { Admin } from "../models/Admin.js";
+import { CollegeAdmin } from "../models/CollegeAdmin.js";
+import { Teacher } from "../models/Teacher.js";
+import { Student } from "../models/Student.js";
+import { findUserByEmail, findAllUsers, countUsers } from "../utils/userLookup.js";
 import { signToken } from "../middleware/auth.js";
 import {
   validateEmail,
@@ -14,11 +17,30 @@ import {
 } from "../utils/helpers.js";
 import { isSuperAdmin, scopeToCollege } from "../utils/scope.js";
 
+const MODEL_BY_ROLE = {
+  admin: Admin,
+  collegeAdmin: CollegeAdmin,
+  teacher: Teacher,
+  student: Student,
+};
+
+function getModel(role) {
+  return MODEL_BY_ROLE[role];
+}
+
 export async function listUsers(req, res) {
   try {
     // Super admin sees everyone; a college admin sees only their own college.
-    const users = await User.find(scopeToCollege(req.user)).sort({ role: 1, name: 1 });
-    res.json({ users: users.map((user) => user.toPublic()) });
+    const users = await findAllUsers(
+      !isSuperAdmin(req.user) ? req.user.collegeId : null,
+      !isSuperAdmin(req.user) ? (req.user.role === "collegeAdmin" ? undefined : null) : null
+    );
+    // Filter out collegeAdmins for college admin view (they can only see teachers/students)
+    let filtered = users;
+    if (!isSuperAdmin(req.user) && req.user.role === "collegeAdmin") {
+      filtered = users.filter((u) => u.role !== "collegeAdmin" && u.role !== "admin");
+    }
+    res.json({ users: filtered.map((user) => user.toPublic ? user.toPublic() : user) });
   } catch (error) {
     serverError(res, error, "users.list");
   }
@@ -44,14 +66,15 @@ export async function createUser(req, res) {
     if (!superAdmin && role !== "teacher" && role !== "student") {
       return res.status(403).json({ error: "You can only create teachers and students." });
     }
-    // The creator's own college always wins for non-super accounts, so the
-    // request body cannot place an account in someone else's college.
+    // A college admin must belong to a college.
+    if (!superAdmin && !actor.collegeId) {
+      return res.status(400).json({ error: "Your account is not assigned to any college. Contact the super admin." });
+    }
+    // The creator's own college always wins for non-super accounts.
     const collegeId = superAdmin ? req.body.collegeId || null : actor.collegeId;
     if ((role === "student" || role === "teacher") && !collegeId) {
       return res.status(400).json({ error: `Select a college for this ${role} account.` });
     }
-    // Teachers and students are created department-wise so a college's people are
-    // grouped (ECE teacher belongs to ECE, and ECE students see ECE courses).
     if ((role === "student" || role === "teacher") && !req.body.departmentId) {
       return res.status(400).json({ error: `Select a department for this ${role} account.` });
     }
@@ -59,10 +82,11 @@ export async function createUser(req, res) {
       return res.status(400).json({ error: "Select a college for this college admin account." });
     }
 
-    const existing = await User.findOne({ email });
+    const existing = await findUserByEmail(email);
     if (existing) return res.status(409).json({ error: "An account with this email already exists." });
 
-    const user = await User.create({
+    const Model = getModel(role);
+    const user = await Model.create({
       name,
       email,
       passwordHash: await bcrypt.hash(password, 10),
@@ -101,6 +125,7 @@ export async function bulkCreateUsers(req, res) {
 
     // College domains drive both auto-routing (email -> college) and validation
     // (an imported address must belong to a domain the target college owns).
+    const { College } = await import("../models/College.js");
     const colleges = await College.find().select("code domains").lean();
     const domainOwner = new Map();
     const domainsByCollege = new Map();
@@ -164,9 +189,11 @@ export async function bulkCreateUsers(req, res) {
 
     const accepted = [...acceptedByEmail.values()];
     const emails = accepted.map((item) => item.email);
-    const existing = new Set(
-      (await User.find({ email: { $in: emails } }).select("email").lean()).map((u) => u.email)
-    );
+    const existingEmails = new Set();
+    for (const email of emails) {
+      const existing = await findUserByEmail(email);
+      if (existing) existingEmails.add(email);
+    }
 
     // bcrypt at cost 10 is intentionally slow; batching keeps the event loop
     // responsive and bounds the work to BULK_ROW_LIMIT hashes.
@@ -180,45 +207,38 @@ export async function bulkCreateUsers(req, res) {
     }
 
     if (accepted.length) {
-      await User.bulkWrite(
-        accepted.map((item) => ({
-          updateOne: {
-            filter: { email: item.email },
-            update: {
-              $set: {
-                name: item.name,
-                passwordHash: hashed.get(item.email),
-                role: item.role,
-                mustChangePassword: item.role !== "admin",
-                collegeId: item.collegeId,
-                departmentId: item.departmentId,
-                department: item.department,
-                studentId: item.studentId,
-              },
-              $setOnInsert: { email: item.email, active: true, tokenVersion: 0 },
+      for (const item of accepted) {
+        const Model = getModel(item.role);
+        await Model.updateOne(
+          { email: item.email },
+          {
+            $set: {
+              name: item.name,
+              passwordHash: hashed.get(item.email),
+              role: item.role,
+              mustChangePassword: item.role !== "admin",
+              collegeId: item.collegeId,
+              departmentId: item.departmentId,
+              department: item.department,
+              studentId: item.studentId,
             },
-            upsert: true,
+            $setOnInsert: { email: item.email, active: true, tokenVersion: 0 },
           },
-        })),
-        { ordered: false }
-      );
+          { upsert: true }
+        );
+      }
     }
 
-    const created = accepted.filter((item) => !existing.has(item.email)).length;
+    const created = accepted.filter((item) => !existingEmails.has(item.email)).length;
     res.json({ created, updated: accepted.length - created, rejected });
   } catch (error) {
     serverError(res, error, "users.bulkCreate");
   }
 }
 
-/**
- * Moves a teacher or student into another department of the same college.
- * Department-wise grouping keeps course alignment simple: an ECE teacher and
- * ECE students share the ECE department, so the admin grants ECE its courses.
- */
 export async function assignUserDepartment(req, res) {
   try {
-    const user = await User.findById(req.params.id);
+    const { user, role } = await findUserById(req.params.id);
     if (!user) return res.status(404).json({ error: "User was not found." });
     if (!isSuperAdmin(req.user) && String(user.collegeId ?? "") !== String(req.user.collegeId ?? "")) {
       return res.status(403).json({ error: "You can only manage accounts in your own college." });
@@ -226,10 +246,9 @@ export async function assignUserDepartment(req, res) {
     if (user.role !== "student" && user.role !== "teacher") {
       return res.status(400).json({ error: "Only teachers and students belong to a department." });
     }
+    const Model = getModel(user.role);
     user.departmentId = req.body.departmentId || null;
     user.department = String(req.body.department ?? "");
-    // Keep the profile's department mirror in step with the admin assignment so
-    // the teacher/student profile page and the required-field check agree.
     if (user.profile) user.profile.department = user.department;
     await user.save();
     res.json({ user: user.toPublic() });
@@ -243,13 +262,14 @@ export async function deleteUser(req, res) {
     if (req.params.id === req.user._id.toString()) {
       return res.status(400).json({ error: "You cannot delete your own account." });
     }
-    const user = await User.findById(req.params.id);
+    const { user, role } = await findUserById(req.params.id);
     if (!user) return res.status(404).json({ error: "User was not found." });
     // A college admin can only remove people from their own college.
     if (!isSuperAdmin(req.user) && String(user.collegeId ?? "") !== String(req.user.collegeId ?? "")) {
       return res.status(403).json({ error: "You can only manage accounts in your own college." });
     }
-    await User.deleteOne({ _id: user._id });
+    const Model = getModel(user.role);
+    await Model.deleteOne({ _id: user._id });
     res.json({ ok: true });
   } catch (error) {
     serverError(res, error, "users.delete");
@@ -258,14 +278,17 @@ export async function deleteUser(req, res) {
 
 export async function updateProfile(req, res) {
   try {
+    const { user, role } = await findUserById(req.user._id.toString());
+    if (!user) return res.status(404).json({ error: "User not found." });
+
     const values = { ...(req.body ?? {}) };
 
     // Departments are assigned by the college admin, not self-service. For a
     // teacher or student we ignore whatever they posted and mirror the
     // admin-assigned department, so the profile stays in sync and can never be
     // used to move between departments.
-    if (req.user.role === "teacher" || req.user.role === "student") {
-      values.department = String(req.user.department ?? "").trim();
+    if (user.role === "teacher" || user.role === "student") {
+      values.department = String(user.department ?? "").trim();
     }
 
     if (req.body.newPassword) {
@@ -273,11 +296,8 @@ export async function updateProfile(req, res) {
       if (!currentPassword) {
         return res.status(400).json({ error: "Enter your current password to set a new one." });
       }
-      const matches = await req.user.comparePassword(currentPassword);
+      const matches = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!matches) {
-        // 400, not 401: the caller's session is fine, only the password they
-        // typed was wrong. A 401 here makes the client treat it as an expired
-        // session and sign the user out mid-save.
         return res.status(400).json({ error: "Your current password is incorrect." });
       }
       if (String(req.body.newPassword).length < PASSWORD_MIN) {
@@ -285,42 +305,29 @@ export async function updateProfile(req, res) {
       }
     }
 
-    // A locked college is read from profile.collegeName; there is no top-level
-    // collegeName field, so the previous check against req.user.collegeName
-    // could never be true and the lock never applied.
-    const lockedCollege = req.user.collegeNameLocked ? (req.user.profile?.collegeName ?? "") : "";
+    const lockedCollege = user.collegeNameLocked ? (user.profile?.collegeName ?? "") : "";
 
     const built = buildProfile(
       values,
-      req.user.profile?.toObject?.() ?? {},
-      req.user.role,
+      user.profile?.toObject?.() ?? {},
+      user.role,
       lockedCollege
     );
 
-    if (built.missing && !isAdminRole(req.user.role)) {
+    if (built.missing && !isAdminRole(user.role)) {
       return res.status(400).json({ error: `Complete your ${profileFieldLabel(built.missing)}.` });
     }
 
-    // Phone number validation
-    if (built.profile.phone) {
-      const phoneDigits = built.profile.phone.replace(/[^0-9]/g, "");
-      if (phoneDigits.length < 7 || phoneDigits.length > 15 || /[a-zA-Z]/.test(built.profile.phone)) {
-        return res.status(400).json({ error: "Phone number must contain only numbers." });
-      }
-    }
-
-    req.user.profile = built.profile;
+    user.profile = built.profile;
 
     if (req.body.newPassword) {
-      req.user.passwordHash = await bcrypt.hash(String(req.body.newPassword), 10);
-      req.user.mustChangePassword = false;
-      // Invalidates every previously issued JWT for this account, including the
-      // one making this request, so a replacement token has to be returned or
-      // the client is left holding a dead token and gets signed out.
-      req.user.tokenVersion = (req.user.tokenVersion ?? 0) + 1;
+      user.passwordHash = await bcrypt.hash(String(req.body.newPassword), 10);
+      user.mustChangePassword = false;
+      user.tokenVersion = (user.tokenVersion ?? 0) + 1;
     }
-    await req.user.save();
-    res.json({ user: req.user.toPublic(), token: signToken(req.user) });
+    await user.save();
+    const token = signToken(user, user.role);
+    res.json({ user: user.toPublic(), token });
   } catch (error) {
     serverError(res, error, "users.updateProfile");
   }
@@ -343,10 +350,12 @@ function currentGoal(user) {
 
 export async function getWeeklyGoal(req, res) {
   try {
-    const { goal, changed } = currentGoal(req.user);
+    const { user } = await findUserById(req.user._id.toString());
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const { goal, changed } = currentGoal(user);
     if (changed) {
-      req.user.weeklyGoal = goal;
-      await req.user.save();
+      user.weeklyGoal = goal;
+      await user.save();
     }
     res.json({ goal });
   } catch (error) {
@@ -356,15 +365,17 @@ export async function getWeeklyGoal(req, res) {
 
 export async function updateWeeklyGoal(req, res) {
   try {
-    const { goal } = currentGoal(req.user);
+    const { user } = await findUserById(req.user._id.toString());
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const { goal } = currentGoal(user);
     const target = clampWeekMinutes(req.body?.targetMinutes, goal.targetMinutes);
     const completed = clampWeekMinutes(req.body?.completedMinutes, goal.completedMinutes);
     if (target === 0) {
       return res.status(400).json({ error: "Weekly target must be at least 1 minute." });
     }
-    req.user.weeklyGoal = { targetMinutes: target, completedMinutes: completed, weekKey: goal.weekKey };
-    await req.user.save();
-    res.json({ goal: req.user.weeklyGoal.toObject() });
+    user.weeklyGoal = { targetMinutes: target, completedMinutes: completed, weekKey: goal.weekKey };
+    await user.save();
+    res.json({ goal: user.weeklyGoal.toObject() });
   } catch (error) {
     serverError(res, error, "users.weeklyGoal.update");
   }

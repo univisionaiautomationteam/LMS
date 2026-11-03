@@ -8,6 +8,14 @@ export type View =
   | "profile"
   | "teacher"
   | "teacherCourses";
+
+export type AdminView =
+  | "overview"
+  | "colleges"
+  | "departments"
+  | "content"
+  | "people"
+  | "geography";
 export type UserRole = "admin" | "collegeAdmin" | "teacher" | "student";
 
 export type StudentProfileDetails = {

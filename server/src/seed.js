@@ -1,7 +1,11 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import { User } from "./models/User.js";
+import { Admin } from "./models/Admin.js";
+import { CollegeAdmin } from "./models/CollegeAdmin.js";
+import { Teacher } from "./models/Teacher.js";
+import { Student } from "./models/Student.js";
+import { College } from "./models/College.js";
 import { Course } from "./models/Course.js";
 
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/lms";
@@ -20,9 +24,10 @@ async function seed() {
     await mongoose.connect(MONGODB_URI);
     console.log("Connected to MongoDB");
 
-    const adminExists = await User.exists({ email: "admin@taraslearn.com" });
+    // Create super admin in `admins` collection
+    const adminExists = await Admin.exists({ email: "admin@taraslearn.com" });
     if (!adminExists) {
-      await User.create({
+      await Admin.create({
         name: "Platform Administrator",
         email: "admin@taraslearn.com",
         passwordHash: await bcrypt.hash("Admin@12345", 10),
@@ -32,7 +37,76 @@ async function seed() {
         collegeNameLocked: true,
         collegeName: "TarasLearn",
       });
-      console.log("Created admin account: admin@taraslearn.com / Admin@12345");
+      console.log("Created super admin: admin@taraslearn.com / Admin@12345 (admins collection)");
+    }
+
+    // Create a sample college and college admin
+    let college = await College.findOne({ code: "NGP" });
+    if (!college) {
+      college = await College.create({
+        name: "NGP Institute of Technology",
+        code: "NGP",
+        state: "Tamil Nadu",
+        domains: ["ngp.com"],
+      });
+      console.log("Created college: NGP Institute of Technology");
+    }
+
+    const collegeAdminExists = await CollegeAdmin.exists({ email: "collegeadmin@ngp.com" });
+    if (!collegeAdminExists) {
+      await CollegeAdmin.create({
+        name: "College Administrator",
+        email: "collegeadmin@ngp.com",
+        passwordHash: await bcrypt.hash("College@12345", 10),
+        role: "collegeAdmin",
+        mustChangePassword: false,
+        collegeId: college._id,
+        collegeNameLocked: true,
+      });
+      console.log("Created college admin: collegeadmin@ngp.com / College@12345 (collegeAdmins collection)");
+    }
+
+    // Create sample departments
+    const deptExists = college.departments.some((d) => d.code === "CSE");
+    if (!deptExists) {
+      college.departments.push({ name: "Computer Science Engineering", code: "CSE", active: true, allowedCourseIds: [] });
+      await college.save();
+      console.log("Created department: CSE");
+    }
+
+    // Create sample teacher
+    const teacherExists = await Teacher.exists({ email: "teacher@ngp.com" });
+    if (!teacherExists) {
+      const cseDept = college.departments.find((d) => d.code === "CSE");
+      await Teacher.create({
+        name: "Raja Kumar",
+        email: "teacher@ngp.com",
+        passwordHash: await bcrypt.hash("Teacher@12345", 10),
+        role: "teacher",
+        mustChangePassword: false,
+        collegeId: college._id,
+        departmentId: cseDept._id,
+        department: "Computer Science Engineering",
+      });
+      console.log("Created teacher: teacher@ngp.com / Teacher@12345 (teachers collection)");
+    }
+
+    // Create sample student
+    const studentExists = await Student.exists({ email: "student@ngp.com" });
+    if (!studentExists) {
+      const cseDept = college.departments.find((d) => d.code === "CSE");
+      await Student.create({
+        name: "Krishna Reddy",
+        email: "student@ngp.com",
+        passwordHash: await bcrypt.hash("Student@12345", 10),
+        role: "student",
+        mustChangePassword: false,
+        studentId: "STU00001",
+        collegeId: college._id,
+        departmentId: cseDept._id,
+        department: "Computer Science Engineering",
+      });
+      console.log("Created student: student@ngp.com / Student@12345 (students collection)");
     }
 
     let insertedCourses = 0;

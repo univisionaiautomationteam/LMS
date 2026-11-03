@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { User } from "../models/User.js";
+import { findUserById } from "../utils/userLookup.js";
 
 function authRequired(roles = []) {
   return async (req, res, next) => {
@@ -10,7 +10,7 @@ function authRequired(roles = []) {
       }
       const token = header.slice("Bearer ".length);
       const payload = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(payload.sub);
+      const { user, role } = await findUserById(payload.sub);
       if (!user || !user.active) {
         return res.status(401).json({ error: "This account is inactive or no longer exists." });
       }
@@ -29,9 +29,9 @@ function authRequired(roles = []) {
   };
 }
 
-export function signToken(user) {
+export function signToken(user, role) {
   return jwt.sign(
-    { sub: user._id.toString(), email: user.email, role: user.role, ver: user.tokenVersion ?? 0 },
+    { sub: user._id.toString(), email: user.email, role, ver: user.tokenVersion ?? 0 },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
   );

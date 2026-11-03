@@ -1,6 +1,6 @@
 import { College } from "../models/College.js";
 import { Course } from "../models/Course.js";
-import { User } from "../models/User.js";
+import { Teacher } from "../models/Teacher.js";
 
 const EMPTY = Object.freeze({ unrestricted: false, slugs: Object.freeze([]) });
 const UNRESTRICTED = Object.freeze({ unrestricted: true, slugs: null });
@@ -56,9 +56,8 @@ export async function resolveCourseAccess(user) {
   // Anything unresolved, inactive or unassigned already fails closed above.
   if (!college?.active || !department || !department.active) return access;
 
-  const faculty = await User.find({
+  const faculty = await Teacher.find({
     collegeId: user.collegeId,
-    role: "teacher",
     $or: [{ departmentId: department._id }, { department: department.name }],
   })
     .select("email")

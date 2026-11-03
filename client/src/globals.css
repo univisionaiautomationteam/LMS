@@ -148,11 +148,6 @@ a { text-decoration: none; color: inherit; }
 .top-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .notification-button { position: relative; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-2); background: var(--surface-2); }
 .notification-button i { position: absolute; top: 8px; right: 9px; width: 7px; height: 7px; background: var(--red); border-radius: 50%; }
-.notification-wrapper { position: relative; display: inline-block; }
-.notifications-panel { position: absolute; top: 44px; right: 0; width: 260px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); z-index: 50; padding: 12px; }
-.notifications-panel h3 { font-size: 0.9rem; margin: 0 0 8px; color: var(--text-1); }
-.notifications-panel p { font-size: 0.82rem; color: var(--text-2); margin: 0 0 10px; }
-.notifications-panel button { font-size: 0.82rem; padding: 4px 10px; }
 .top-profile-button { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 10px; }
 .top-profile-button:hover { background: var(--surface-2); }
 .top-profile-button b {
@@ -771,6 +766,7 @@ a { text-decoration: none; color: inherit; }
 .overview-card { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
 .overview-icon { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; background: rgba(108, 92, 231, 0.1); color: var(--primary); }
 .overview-card strong { font-size: 1.5rem; display: block; line-height: 1; }
+.admin-kpis article strong { font-size: 1.5rem; display: block; line-height: 1; }
 .overview-card small { color: var(--text-3); font-size: 0.78rem; }
 .overview-quick { margin-top: 8px; }
 .overview-quick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 8px; }
@@ -805,6 +801,80 @@ a { text-decoration: none; color: inherit; }
 .side-panel-body { padding: 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 12px; }
 .side-panel-footer { padding: 14px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
 .panel-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+.college-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+.college-card-actions button { flex: 1; font-size: 0.78rem; padding: 4px 8px; }
+.department-actions { display: flex; gap: 6px; margin-top: 6px; }
+.department-actions button { flex: 1; font-size: 0.75rem; padding: 4px 8px; }
+.department-edit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.department-edit-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; }
+.department-edit-form input { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; }
+.department-edit-form .department-actions { grid-column: span 2; }
+.department-confirm { margin-top: 8px; padding: 8px; background: rgba(220, 38, 38, 0.05); border-radius: 6px; }
+.department-confirm p { margin: 0 0 8px; font-size: 0.85rem; }
+.department-confirm .danger-button { flex: 1; }
+
+.department-summary-section { margin-top: 24px; }
+.department-summary-section .section-heading { margin-bottom: 12px; }
+.department-summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.department-summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+.department-summary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.department-summary-head strong { display: block; font-size: 0.95rem; color: var(--text-1); }
+.department-summary-head small { font-size: 0.72rem; color: var(--text-3); }
+.department-summary-stats { display: flex; gap: 12px; font-size: 0.85rem; color: var(--text-2); }
+.department-summary-stats span strong { color: var(--text-1); }
+
+.quiz-question label.correct { color: var(--green); }
+.quiz-question label.wrong { color: var(--red); }
+.quiz-question label.chosen { color: var(--primary); font-weight: 600; }
+.answer-grid label.chosen { color: var(--primary); font-weight: 600; }
+.answer-grid label.correct { color: var(--green); font-weight: 700; }
+.answer-grid label.wrong { color: var(--red); font-weight: 700; }
+
+/* ---------- Modal / dialog enhancements ---------- */
+.delete-confirm-card {
+  margin: 16px 0 20px;
+  padding: 18px;
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.15);
+  border-radius: 12px;
+  text-align: center;
+}
+.delete-icon {
+  font-size: 2.2rem;
+  color: var(--red);
+  margin-bottom: 8px;
+  display: block;
+}
+.delete-confirm-card h3 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+  color: var(--text-1);
+}
+.delete-confirm-card p {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: 0.9rem;
+}
+.delete-confirm-card .warn-text {
+  color: var(--text-3);
+  font-size: 0.78rem;
+  display: block;
+}
+.side-panel-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.side-panel-footer .text-button {
+  flex: 1;
+}
+.side-panel-footer .danger-button,
+.side-panel-footer .primary-button {
+  flex: 1;
+}
 
 /* ---------------- Responsive ---------------- */
 @media (max-width: 960px) {

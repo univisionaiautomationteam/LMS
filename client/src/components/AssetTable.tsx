@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import type { Asset, Course } from "../types";
 import { formatBytes } from "../data/constants";
-import { useToast } from "../context/ToastContext";
+import { usePopup } from "../context/PopupContext";
 
 export default function AssetTable({
   assets,
@@ -23,7 +23,7 @@ export default function AssetTable({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
-  const { success, error } = useToast();
+  const { success, error } = usePopup();
 
   async function open(asset: Asset) {
     try {

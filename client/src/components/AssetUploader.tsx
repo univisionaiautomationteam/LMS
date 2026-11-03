@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, uploadFile } from "../api/client";
 import type { Asset, Course } from "../types";
-import { useToast } from "../context/ToastContext";
+import { usePopup } from "../context/PopupContext";
 
 // Keep in step with MAX_UPLOAD_BYTES on the server (1 GB).
 const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
@@ -22,7 +22,7 @@ export default function AssetUploader({
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const { success, error } = useToast();
+  const { success, error } = usePopup();
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

@@ -38,9 +38,9 @@ export default function TeacherDashboard({
           <button className="primary-small" type="button" onClick={() => goTo("teacherCourses")}>
             <Plus size={15} /> Create course
           </button>
-          <button className="outline-small" type="button" onClick={() => goTo("profile")}>
+          {/* <button className="outline-small" type="button" onClick={() => goTo("profile")}>
             <UserRound size={15} /> Edit profile
-          </button>
+          </button> */}
         </div>
       </section>
 

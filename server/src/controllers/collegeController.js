@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { College } from "../models/College.js";
-import { User } from "../models/User.js";
+import { CollegeAdmin } from "../models/CollegeAdmin.js";
+import { findUserByEmail } from "../utils/userLookup.js";
 import { serverError, validateEmail, PASSWORD_MIN } from "../utils/helpers.js";
 import { isSuperAdmin, canAdminCollege } from "../utils/scope.js";
 
@@ -48,7 +49,7 @@ export async function createCollege(req, res) {
       if (adminPassword.length < PASSWORD_MIN) {
         return res.status(400).json({ error: `College admin password must be at least ${PASSWORD_MIN} characters.` });
       }
-      const adminExists = await User.findOne({ email: adminEmail });
+      const adminExists = await findUserByEmail(adminEmail);
       if (adminExists) return res.status(409).json({ error: "An account with this email already exists." });
     }
 
@@ -61,7 +62,7 @@ export async function createCollege(req, res) {
 
     let admin = null;
     if (wantsAdmin) {
-      admin = await User.create({
+      admin = await CollegeAdmin.create({
         name: adminName,
         email: adminEmail,
         passwordHash: await bcrypt.hash(adminPassword, 10),
@@ -95,6 +96,55 @@ export async function addDepartment(req, res) {
     res.status(201).json({ college: college.toPublic() });
   } catch (error) {
     serverError(res, error, "colleges.addDepartment");
+  }
+}
+
+export async function updateDepartment(req, res) {
+  try {
+    const college = await College.findById(req.params.id);
+    if (!college) return res.status(404).json({ error: "College was not found." });
+    if (!canAdminCollege(req.user, college._id)) {
+      return res.status(403).json({ error: "You can only manage your own college." });
+    }
+    const department = college.departments.id(req.params.departmentId);
+    if (!department) return res.status(404).json({ error: "Department was not found." });
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: "Department name is required." });
+      department.name = name;
+    }
+    if (req.body.code !== undefined) {
+      const code = String(req.body.code).trim().toUpperCase();
+      if (!code) return res.status(400).json({ error: "Department code is required." });
+      if (college.departments.some((d) => d._id.toString() !== req.params.departmentId && d.code === code)) {
+        return res.status(409).json({ error: "This department code already exists in the college." });
+      }
+      department.code = code;
+    }
+    if (typeof req.body.active === "boolean") department.active = req.body.active;
+    college.markModified("departments");
+    await college.save();
+    res.json({ college: college.toPublic() });
+  } catch (error) {
+    serverError(res, error, "colleges.updateDepartment");
+  }
+}
+
+export async function deleteDepartment(req, res) {
+  try {
+    const college = await College.findById(req.params.id);
+    if (!college) return res.status(404).json({ error: "College was not found." });
+    if (!canAdminCollege(req.user, college._id)) {
+      return res.status(403).json({ error: "You can only manage your own college." });
+    }
+    const department = college.departments.id(req.params.departmentId);
+    if (!department) return res.status(404).json({ error: "Department was not found." });
+    college.departments.pull({ _id: req.params.departmentId });
+    college.markModified("departments");
+    await college.save();
+    res.json({ college: college.toPublic() });
+  } catch (error) {
+    serverError(res, error, "colleges.deleteDepartment");
   }
 }
 
@@ -144,7 +194,10 @@ export async function deleteCollege(req, res) {
   try {
     const college = await College.findByIdAndDelete(req.params.id);
     if (!college) return res.status(404).json({ error: "College was not found." });
-    await User.updateMany({ collegeId: college._id }, { $set: { collegeId: null, departmentId: null } });
+    // Remove all college admins, teachers, and students belonging to this college
+    await CollegeAdmin.deleteMany({ collegeId: college._id });
+    await Teacher.deleteMany({ collegeId: college._id });
+    await Student.deleteMany({ collegeId: college._id });
     res.json({ ok: true });
   } catch (error) {
     serverError(res, error, "colleges.delete");

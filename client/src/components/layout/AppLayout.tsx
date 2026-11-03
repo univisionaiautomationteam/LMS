@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Compass, Code2, FileUp, GraduationCap, HomeIcon, MapPinned, UserRound, Bell, Search, Sparkles, Users, BookOpen } from "lucide-react";
+import { ArrowLeft, Compass, Code2, FileUp, GraduationCap, HomeIcon, MapPinned, UserRound, Search, Sparkles, Users, BookOpen } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { api, roleLabel } from "../../api/client";
-import type { Asset, College, Course, CourseProgress, ProgressSummary, View } from "../../types";
+import type { Asset, College, Course, CourseProgress, ProgressSummary, View, AdminView } from "../../types";
 import { starterCourses } from "../../data/constants";
 import HomePage from "../../pages/HomePage";
 import CatalogPage from "../../pages/CatalogPage";
@@ -34,12 +34,12 @@ export default function AppLayout() {
   const [summary, setSummary] = useState<ProgressSummary | null>(null);
   const [search, setSearch] = useState("");
   const [courseId, setCourseId] = useState("python");
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [adminView, setAdminViewState] = useState<AdminView>("overview");
 
   // In-app back stack. Every navigation pushes the page we are leaving (view +
   // the course it was showing), so the back button steps one page back for
   // admin, teacher and student alike — including back into a specific course.
-  const [history, setHistory] = useState<{ view: View; courseId: string }[]>([]);
+  const [history, setHistory] = useState<{ view: View; courseId: string; adminView?: AdminView }[]>([]);
 
   const assignedCollege = colleges.find((college) => college._id === user?.collegeId);
   const assignedDepartment = assignedCollege?.departments.find(
@@ -119,8 +119,15 @@ export default function AppLayout() {
   /** Navigate forward, remembering the page we are leaving. Same-page clicks are ignored. */
   function navigate(next: View) {
     if (next === view) return;
-    setHistory((h) => [...h, { view, courseId }]);
+    setHistory((h) => [...h, { view, courseId, adminView }]);
     setView(next);
+    if (next === "admin") setAdminViewState("overview");
+  }
+
+  /** Navigate between admin sub-views (overview, colleges, departments, etc.), pushing to history. */
+  function navigateToAdminView(next: AdminView) {
+    setHistory((h) => [...h, { view, courseId, adminView }]);
+    setAdminViewState(next);
   }
 
   function openCourse(id: string) {
@@ -140,8 +147,10 @@ export default function AppLayout() {
       // If no history, go to role-appropriate home/dashboard
       if (user?.role === "teacher") {
         setView("teacher");
+        setAdminViewState("overview");
       } else if (isAdminLike) {
         setView("admin");
+        setAdminViewState("overview");
       } else {
         setView("home");
       }
@@ -152,13 +161,20 @@ export default function AppLayout() {
     const courseGone = prev.view === "course" && !availableCourses.some((c) => c.slug === prev.courseId);
     if (courseGone) {
       setView(user?.role === "teacher" ? "teacher" : isAdminLike ? "admin" : "catalog");
+      setAdminViewState("overview");
+      return;
+    }
+    // If coming back into an admin sub-view, restore the adminView too.
+    if (prev.view === "admin" && isAdminLike) {
+      setView("admin");
+      setAdminViewState(prev.adminView ?? "overview");
       return;
     }
     setCourseId(prev.courseId);
     setView(prev.view);
   }
 
-  const canGoBack = history.length > 0;
+  const canGoBack = true;
 
   /** Leaving the profile returns to where the user came from, or their home page. */
   function leaveProfile() {
@@ -167,6 +183,7 @@ export default function AppLayout() {
       return;
     }
     setView(user?.role === "teacher" ? "teacher" : isAdminLike ? "admin" : "home");
+    setAdminViewState("overview");
   }
 
   if (!user) return null;
@@ -231,22 +248,9 @@ export default function AppLayout() {
             <kbd>⌘ K</kbd>
           </div>
           <div className="top-actions">
-            <div className="notification-wrapper">
-              <button className="notification-button" aria-label="Notifications" onClick={() => setNotificationsOpen(!notificationsOpen)}>
-                <Bell size={17} />
-                <i />
-              </button>
-              {notificationsOpen && (
-                <div className="notifications-panel">
-                  <h3>Notifications</h3>
-                  <p>No new notifications.</p>
-                  <button className="text-button" type="button" onClick={() => setNotificationsOpen(false)}>Close</button>
-                </div>
-              )}
-            </div>
-            {user.role === "teacher" && view !== "teacherCourses" && (
+            {/* {user.role === "teacher" && view !== "teacherCourses" && (
               <button className="primary-small create-top-button" onClick={() => navigate("teacherCourses")}><span>＋</span>Create course</button>
-            )}
+            )} */}
             <button className="top-profile-button" onClick={() => navigate("profile")} aria-label={`Open ${user.name} profile`}>
               <b>{user.name.slice(0, 1).toUpperCase()}</b>
               <span><strong>{user.name.split(" ")[0]}</strong><small>{user.role}</small></span>
@@ -287,6 +291,8 @@ export default function AppLayout() {
               colleges={colleges}
               setColleges={setColleges}
               search={search}
+              adminView={adminView}
+              onNavigateToAdminView={navigateToAdminView}
             />
           ))}
       </section>

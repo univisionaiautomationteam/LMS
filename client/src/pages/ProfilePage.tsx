@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api, roleLabel } from "../api/client";
-import { useToast } from "../context/ToastContext";
+import { usePopup } from "../context/PopupContext";
 import { INDIA_STATES } from "../data/constants";
 import TeacherProfileFields from "../components/profile/TeacherProfileFields";
 import StudentProfileFields from "../components/profile/StudentProfileFields";
@@ -11,7 +11,7 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const profile = user?.profile;
-  const { success, error } = useToast();
+  const { success, error } = usePopup();
 
   if (!user) return null;
 
@@ -151,7 +151,7 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
         <div className="profile-form-actions">
           <button className="text-button" type="button" onClick={onSaved}>Cancel</button>
           <button className="primary-button" type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Save profile <span>→</span>"}
+            {busy ? "Saving…" : (<>Save profile <span>→</span></>)}
           </button>
         </div>
       </form>

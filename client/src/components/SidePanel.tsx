@@ -11,12 +11,14 @@ export default function SidePanel({
   onClose,
   children,
   footer,
+  closeOnBackdrop = true,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  closeOnBackdrop?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -32,7 +34,7 @@ export default function SidePanel({
   }, [onClose]);
 
   return (
-    <div className="panel-overlay" onClick={onClose} role="presentation">
+    <div className="panel-overlay" onClick={closeOnBackdrop ? onClose : undefined} role="presentation">
       <aside className="side-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="side-panel-head">
           <div className="side-panel-heading">

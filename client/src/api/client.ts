@@ -116,6 +116,10 @@ export const api = {
     request<{ college: College }>(`/colleges/${id}`, { method: "PUT", body: JSON.stringify(values) }),
   createCollegeDepartment: (id: string, values: Record<string, unknown>) =>
     request<{ college: College }>(`/colleges/${id}/departments`, { method: "POST", body: JSON.stringify(values) }),
+  updateCollegeDepartment: (id: string, departmentId: string, values: Record<string, unknown>) =>
+    request<{ college: College }>(`/colleges/${id}/departments/${departmentId}`, { method: "PUT", body: JSON.stringify(values) }),
+  deleteCollegeDepartment: (id: string, departmentId: string) =>
+    request<{ ok: boolean }>(`/colleges/${id}/departments/${departmentId}`, { method: "DELETE" }),
   updateDepartmentAccess: (id: string, departmentId: string, values: Record<string, unknown>) =>
     request<{ college: College }>(`/colleges/${id}/departments/${departmentId}/access`, {
       method: "PUT",

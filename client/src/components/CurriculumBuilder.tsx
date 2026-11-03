@@ -197,12 +197,13 @@ export default function CurriculumBuilder({
 
           {module.lessons.map((lesson, li) => {
             const quiz = lesson.quiz ?? blankQuiz();
+            const isQuiz = lesson.type === "quiz";
             return (
               <div className="builder-lesson" key={lesson.key}>
                 <div className="builder-lesson-fields">
                   <label>
-                    Lesson title
-                    <input value={lesson.title} onChange={(e) => patchLesson(mi, li, { title: e.target.value })} placeholder="e.g. Reading sensor data" />
+                    {isQuiz ? "Topic" : "Lesson title"}
+                    <input value={lesson.title} onChange={(e) => patchLesson(mi, li, { title: e.target.value })} placeholder={isQuiz ? "e.g. Python basics quiz" : "e.g. Reading sensor data"} />
                   </label>
                   <label>
                     Type
@@ -218,14 +219,16 @@ export default function CurriculumBuilder({
                       {LESSON_TYPES.map((type) => <option value={type} key={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}
                     </select>
                   </label>
-                  <label>
-                    Duration
-                    <input value={lesson.duration} onChange={(e) => patchLesson(mi, li, { duration: e.target.value })} placeholder="e.g. 12:30" />
-                  </label>
+                  {!isQuiz && (
+                    <label>
+                      Duration
+                      <input value={lesson.duration} onChange={(e) => patchLesson(mi, li, { duration: e.target.value })} placeholder="e.g. 12:30" />
+                    </label>
+                  )}
                   <button className="text-button" type="button" onClick={() => removeLesson(mi, li)}>Remove</button>
                 </div>
 
-                {lesson.type === "quiz" ? (
+                {isQuiz ? (
                   <div className="builder-quiz">
                     <div className="form-row">
                       <label>
@@ -234,7 +237,7 @@ export default function CurriculumBuilder({
                       </label>
                       <label>
                         Pass score (%)
-                        <input type="number" min={0} max={100} value={quiz.passScore} onChange={(e) => patchQuiz(mi, li, { passScore: Number(e.target.value) })} />
+                        <input type="number" min={0} max={100} value={quiz.passScore} onChange={(e) => patchQuiz(mi, li, { passScore: Number(e.target.value) || 0 })} />
                       </label>
                     </div>
                     {quiz.questions.map((question, qi) => (
@@ -244,6 +247,7 @@ export default function CurriculumBuilder({
                           value={question.prompt}
                           onChange={(e) => patchQuestion(mi, li, qi, { prompt: e.target.value })}
                           placeholder={`Question ${qi + 1}`}
+                          autoFocus={qi === 0 && !question.prompt}
                         />
                         {question.options.map((option, oi) => (
                           <label className="question-option" key={oi}>

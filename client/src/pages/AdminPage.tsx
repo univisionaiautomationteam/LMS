@@ -3,8 +3,8 @@ import * as XLSX from "xlsx";
 import { BookOpen, Building2, GraduationCap, Layers, Library, MapPinned, Users } from "lucide-react";
 import { api, courseAuthorLabel } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { useToast } from "../context/ToastContext";
-import type { Asset, AuthUser, College, Course } from "../types";
+import { usePopup } from "../context/PopupContext";
+import type { Asset, AuthUser, College, Course, AdminView } from "../types";
 import { INDIA_STATES } from "../data/constants";
 import AdminStudentMap from "../components/AdminStudentMap";
 import AssetUploader from "../components/AssetUploader";
@@ -26,8 +26,6 @@ type BulkRow = {
   issue: string;
 };
 
-type AdminView = "overview" | "colleges" | "departments" | "content" | "people" | "geography";
-
 export default function AdminPage({
   courses,
   setCourses,
@@ -36,6 +34,8 @@ export default function AdminPage({
   colleges,
   setColleges,
   search = "",
+  adminView = "overview",
+  onNavigateToAdminView,
 }: {
   courses: Course[];
   setCourses: React.Dispatch<React.SetStateAction<Course[]>>;
@@ -44,13 +44,15 @@ export default function AdminPage({
   colleges: College[];
   setColleges: React.Dispatch<React.SetStateAction<College[]>>;
   search?: string;
+  adminView?: AdminView;
+  onNavigateToAdminView: (next: AdminView) => void;
 }) {
   const { user } = useAuth();
-  const [adminView, setAdminView] = useState<AdminView>("overview");
-  const [status, setStatus] = useState("");
-  const [collegeStatus, setCollegeStatus] = useState("");
   const [deleteCollegeId, setDeleteCollegeId] = useState("");
-  const [bulkStatus, setBulkStatus] = useState("");
+  const [editCollege, setEditCollege] = useState<College | null>(null);
+  const [editForm, setEditForm] = useState<{ name: string; code: string; state: string; domains: string; active: boolean } | null>(null);
+  const [editDepartmentId, setEditDepartmentId] = useState<{ collegeId: string; departmentId: string; name: string; code: string } | null>(null);
+  const [deleteDepartmentId, setDeleteDepartmentId] = useState<{ collegeId: string; departmentId: string } | null>(null);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [selectedCollegeId, setSelectedCollegeId] = useState("");
@@ -61,11 +63,10 @@ export default function AdminPage({
   const [userCollegeId, setUserCollegeId] = useState(user?.collegeId ?? "");
   const [defaultPassword, setDefaultPassword] = useState("");
   const [domainsDraft, setDomainsDraft] = useState("");
-  const [domainsStatus, setDomainsStatus] = useState("");
   const [showCollegeForm, setShowCollegeForm] = useState(false);
   const [structureCollegeId, setStructureCollegeId] = useState<string | null>(null);
   const [pushTargets, setPushTargets] = useState<Record<string, boolean>>({});
-  const { success, error } = useToast();
+  const { success, error, info } = usePopup();
 
   // Super admin runs the whole platform (creates colleges, courses, assets);
   // a college admin runs only their own college (people, departments, access).
@@ -102,7 +103,6 @@ export default function AdminPage({
 
   useEffect(() => {
     setDomainsDraft((selectedCollege?.domains ?? []).join(", "));
-    setDomainsStatus("");
   }, [selectedCollege?._id, selectedCollege?.domains?.join(",")]);
 
   if (!user) return null;
@@ -112,10 +112,9 @@ export default function AdminPage({
     const formEl = e.currentTarget;
     const values = readCourseForm(new FormData(formEl));
     if (!values.title) {
-      setStatus("Course title is required.");
+      error("Course title is required.");
       return;
     }
-    setStatus("Creating course…");
     try {
       const { course } = await api.createCourse(values);
       setCourses((cur) => [course, ...cur]);
@@ -134,14 +133,11 @@ export default function AdminPage({
           }
         }
       }
-      setStatus(pushed ? `Course “${course.title}” is live and pushed to ${pushed} department(s).` : `Course “${course.title}” is live.`);
-      success("Course created", `“${course.title}” has been published.`);
+      success("Course created", pushed ? `“${course.title}” is live and pushed to ${pushed} department(s).` : `“${course.title}” is live.`);
       formEl.reset();
       setPushTargets({});
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Course creation failed.";
-      setStatus(msg);
-      error("Create failed", msg);
+      error("Create failed", err instanceof Error ? err.message : "Course creation failed.");
     }
   }
 
@@ -149,7 +145,6 @@ export default function AdminPage({
     e.preventDefault();
     const formEl = e.currentTarget;
     const form = new FormData(formEl);
-    setStatus("Creating login…");
     try {
       const role = String(form.get("role") ?? "student");
       const collegeId = String(form.get("collegeId") ?? "");
@@ -174,14 +169,11 @@ export default function AdminPage({
         department,
       });
       setUsers((cur) => [created, ...cur]);
-      setStatus(`Login created for ${created.name} (${created.email}).`);
       success("User created", `Login created for ${created.name} (${created.email}).`);
       formEl.reset();
       setUserCollegeId("");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Account creation failed.";
-      setStatus(msg);
-      error("Create failed", msg);
+      error("Create failed", err instanceof Error ? err.message : "Account creation failed.");
     }
   }
 
@@ -189,7 +181,6 @@ export default function AdminPage({
     e.preventDefault();
     const formEl = e.currentTarget;
     const form = new FormData(formEl);
-    setCollegeStatus("Creating college…");
     try {
       const { college, admin } = await api.createCollege({
         name: form.get("name"),
@@ -204,18 +195,11 @@ export default function AdminPage({
       if (admin) setUsers((cur) => [admin, ...cur]);
       setSelectedCollegeId(college._id);
       setDomainsDraft((college.domains ?? []).join(", "));
-      setCollegeStatus(
-        admin
-          ? `${college.name} created with college admin ${admin.email}. Now add its first department.`
-          : `${college.name} created. Now add its first department.`
-      );
-      success("College created", `${college.name} has been added.`);
+      success("College created", admin ? `${college.name} created with college admin ${admin.email}. Now add its first department.` : `${college.name} created. Now add its first department.`);
       formEl.reset();
       setShowCollegeForm(false);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unable to create college.";
-      setCollegeStatus(msg);
-      error("Create failed", msg);
+      error("Create failed", err instanceof Error ? err.message : "Unable to create college.");
     }
   }
 
@@ -224,22 +208,18 @@ export default function AdminPage({
     if (!selectedCollege) return;
     const formEl = e.currentTarget;
     const form = new FormData(formEl);
-    setCollegeStatus("Creating department…");
     try {
       const { college } = await api.createCollegeDepartment(selectedCollege._id, {
         name: form.get("departmentName"),
         code: form.get("departmentCode"),
       });
+      const created = college.departments?.[college.departments.length - 1];
       setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
-      const created = college.departments.find((d: { code: string }) => d.code === String(form.get("departmentCode")).toUpperCase());
       setSelectedDepartmentId(created?._id ?? "");
-      setCollegeStatus(`${form.get("departmentName")} created. Assign its courses.`);
-      success("Department created", `${form.get("departmentName")} has been added.`);
+      success("Department created", `${form.get("departmentName")} created. Assign its courses.`);
       formEl.reset();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unable to create department.";
-      setCollegeStatus(msg);
-      error("Create failed", msg);
+      error("Create failed", err instanceof Error ? err.message : "Unable to create department.");
     }
   }
 
@@ -248,36 +228,28 @@ export default function AdminPage({
     if (!selectedCollege || !selectedDepartment) return;
     const form = new FormData(e.currentTarget);
     const allowedCourseIds = form.getAll("courseIds").map(String);
-    setCollegeStatus("Saving course access…");
     try {
       const { college } = await api.updateDepartmentAccess(selectedCollege._id, selectedDepartment._id, {
         allowedCourseIds,
         active: form.get("active") === "on",
       });
       setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
-      setCollegeStatus(`${selectedDepartment.name} students can access ${allowedCourseIds.length} courses.`);
       success("Access saved", `Course access updated for ${selectedDepartment.name}.`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unable to save college access.";
-      setCollegeStatus(msg);
-      error("Save failed", msg);
+      error("Save failed", err instanceof Error ? err.message : "Unable to save college access.");
     }
   }
 
   async function saveCollegeDomains(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!selectedCollege) return;
-    setDomainsStatus("Saving email domains…");
     try {
       const { college } = await api.updateCollege(selectedCollege._id, { domains: domainsDraft });
       setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
       setDomainsDraft((college.domains ?? []).join(", "));
-      setDomainsStatus(college.domains.length ? `Saved ${college.domains.length} domain(s).` : "Domains cleared.");
       success("Domains saved", `Email domains updated for ${selectedCollege.name}.`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unable to save domains.";
-      setDomainsStatus(msg);
-      error("Save failed", msg);
+      error("Save failed", err instanceof Error ? err.message : "Unable to save domains.");
     }
   }
 
@@ -289,13 +261,17 @@ export default function AdminPage({
   async function previewBulkUsers(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     setBulkRows([]);
-    setBulkStatus("");
     if (!file) return;
     try {
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      const rows = records.map((record, index): BulkRow => {
+      let allRecords: Record<string, unknown>[] = [];
+      // Read every sheet in the workbook so multi-page Excel files are fully imported.
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        allRecords = allRecords.concat(records);
+      }
+      const rows = allRecords.map((record, index): BulkRow => {
         const name = cellValue(record, ["full name", "name", "student name", "teacher name"]);
         const email = cellValue(record, ["email", "email address", "college email"]).toLowerCase();
         // A row may omit its own password when a default password is set for the whole import.
@@ -321,29 +297,25 @@ export default function AdminPage({
         return { row: index + 2, name, email, role, password, studentId, department, collegeId, valid: issues.length === 0, issue: issues.join("; ") };
       });
       setBulkRows(rows);
-      setBulkStatus(`${rows.filter((r) => r.valid).length} ready · ${rows.filter((r) => !r.valid).length} need attention · re-imports overwrite by email`);
+      success("Bulk preview", `${rows.filter((r) => r.valid).length} ready · ${rows.filter((r) => !r.valid).length} need attention · re-imports overwrite by email`);
     } catch {
-      setBulkStatus("Unable to read this spreadsheet.");
+      error("Import failed", "Unable to read this spreadsheet.");
     }
   }
 
   async function importBulkUsers() {
     const validRows = bulkRows.filter((r) => r.valid);
-    if (!validRows.length) { setBulkStatus("There are no valid rows to import."); return; }
-    setBulkStatus(`Importing ${validRows.length} accounts…`);
+    if (!validRows.length) { error("Import failed", "There are no valid rows to import."); return; }
     try {
       const result = await api.createUsersBulk(
         validRows.map((r) => ({ name: r.name, email: r.email, role: r.role, temporaryPassword: r.password, studentId: r.studentId, department: r.department, collegeId: r.collegeId })),
         defaultPassword
       );
-      setBulkStatus(`${result.created} created · ${result.updated} updated · ${result.rejected.length} rejected.`);
-      success("Bulk import complete", `${result.created} created, ${result.updated} updated, ${result.rejected.length} rejected.`);
+      success("Bulk import complete", `${result.created} created · ${result.updated} updated · ${result.rejected.length} rejected.`);
       setBulkRows([]);
       api.listUsers().then(({ users }) => setUsers(users)).catch(() => {});
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Bulk import failed.";
-      setBulkStatus(msg);
-      error("Import failed", msg);
+      error("Import failed", err instanceof Error ? err.message : "Bulk import failed.");
     }
   }
 
@@ -356,7 +328,7 @@ export default function AdminPage({
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Users");
     XLSX.writeFile(workbook, "TarasLearn_Bulk_User_Template.xlsx");
-    setBulkStatus("Template downloaded. Replace the sample learner details before upload.");
+    info("Template downloaded", "Replace the sample learner details before upload.");
   }
 
   async function updateCourse(e: React.FormEvent<HTMLFormElement>) {
@@ -367,12 +339,9 @@ export default function AdminPage({
       const { course } = await api.updateCourse(id, readCourseForm(data));
       setCourses((items) => items.map((c) => (c.slug === course.slug || c._id === course._id ? course : c)));
       setEditingCourseId(null);
-      setStatus(`Course “${course.title}” was updated.`);
       success("Course updated", `“${course.title}” has been revised.`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Course update failed.";
-      setStatus(msg);
-      error("Update failed", msg);
+      error("Update failed", err instanceof Error ? err.message : "Course update failed.");
     }
   }
 
@@ -381,12 +350,9 @@ export default function AdminPage({
     try {
       await api.deleteCourse(id);
       setCourses((items) => items.filter((c) => c._id !== id && c.slug !== id));
-      setStatus("Course deleted.");
       success("Course deleted", "The course has been removed from the catalog.");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Course deletion failed.";
-      setStatus(msg);
-      error("Delete failed", msg);
+      error("Delete failed", err instanceof Error ? err.message : "Course deletion failed.");
     }
   }
 
@@ -395,7 +361,6 @@ export default function AdminPage({
       await api.deleteCollege(id);
       setColleges((cur) => cur.filter((c) => c._id !== id));
       setDeleteCollegeId("");
-      setCollegeStatus("College deleted.");
       success("College deleted", "The college has been removed.");
       if (selectedCollegeId === id) {
         setSelectedCollegeId("");
@@ -405,7 +370,6 @@ export default function AdminPage({
     } catch (err) {
       const msg = err instanceof Error ? err.message : "College deletion failed.";
       setDeleteCollegeId("");
-      setCollegeStatus(msg);
       error("Delete failed", msg);
     }
   }
@@ -415,11 +379,9 @@ export default function AdminPage({
     try {
       await api.deleteUser(authUser._id);
       setUsers((cur) => cur.filter((u) => u._id !== authUser._id));
-      setStatus(`${authUser.name}'s account was deleted.`);
       success("User deleted", `${authUser.name}'s account has been removed.`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "User deletion failed.";
-      setStatus(msg);
       error("Delete failed", msg);
     }
   }
@@ -430,12 +392,9 @@ export default function AdminPage({
     try {
       const { user: updated } = await api.assignUserDepartment(authUser._id, { departmentId, department });
       setUsers((cur) => cur.map((u) => (u._id === updated._id ? updated : u)));
-      setStatus(`${updated.name} moved to ${department || "no department"}.`);
       success("Department updated", `${updated.name} moved to ${department || "no department"}.`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unable to move this account.";
-      setStatus(msg);
-      error("Update failed", msg);
+      error("Update failed", err instanceof Error ? err.message : "Unable to move this account.");
     }
   }
 
@@ -464,7 +423,7 @@ export default function AdminPage({
             key={view.id}
             type="button"
             className={`admin-tab ${adminView === view.id ? "active" : ""}`}
-            onClick={() => setAdminView(view.id)}
+            onClick={() => onNavigateToAdminView(view.id)}
           >
             {view.label}
           </button>
@@ -488,14 +447,49 @@ export default function AdminPage({
             </section>
           )}
 
+          <section className="department-summary-section">
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">Department-wise students & faculty</span>
+                <h2>{isCollegeAdmin ? "Your college departments" : "All departments"}</h2>
+              </div>
+            </div>
+            <div className="department-summary-grid">
+              {colleges
+                .filter((c) => isCollegeAdmin ? String(c._id) === String(user?.collegeId) : true)
+                .flatMap((college) =>
+                  college.departments.map((d) => {
+                    const deptTeachers = users.filter((u) => u.role === "teacher" && String(u.departmentId) === String(d._id));
+                    const deptStudents = users.filter((u) => u.role === "student" && String(u.departmentId) === String(d._id));
+                    return (
+                      <article key={d._id} className="department-summary-card">
+                        <div className="department-summary-head">
+                          <div>
+                            <span className="pill">{d.code}</span>
+                            <strong>{d.name}</strong>
+                            <small>{college.code}</small>
+                          </div>
+                        </div>
+                        <div className="department-summary-stats">
+                          <span><strong>{deptStudents.length}</strong> students</span>
+                          <span><strong>{deptTeachers.length}</strong> teachers</span>
+                          <span><strong>{d.allowedCourseIds.length}</strong> courses</span>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+            </div>
+          </section>
+
           <section className="overview-quick">
             <div className="section-heading"><div><span className="eyebrow">Get going</span><h2>Quick actions</h2></div></div>
             <div className="overview-quick-grid">
-              {isAdmin && <button type="button" className="quick-card" onClick={() => setAdminView("colleges")}><Building2 size={18} /><span><strong>Colleges</strong><small>Add or review institutions</small></span></button>}
-              <button type="button" className="quick-card" onClick={() => setAdminView("departments")}><Layers size={18} /><span><strong>Departments & access</strong><small>Grant courses by department</small></span></button>
-              <button type="button" className="quick-card" onClick={() => setAdminView("content")}><Library size={18} /><span><strong>Content library</strong><small>Courses, videos & documents</small></span></button>
-              <button type="button" className="quick-card" onClick={() => setAdminView("people")}><Users size={18} /><span><strong>People</strong><small>Create or import accounts</small></span></button>
-              <button type="button" className="quick-card" onClick={() => setAdminView("geography")}><MapPinned size={18} /><span><strong>Student geography</strong><small>See learners across India</small></span></button>
+              {isAdmin && <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("colleges")}><Building2 size={18} /><span><strong>Colleges</strong><small>Add or review institutions</small></span></button>}
+              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("departments")}><Layers size={18} /><span><strong>Departments & access</strong><small>Grant courses by department</small></span></button>
+              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("content")}><Library size={18} /><span><strong>Content library</strong><small>Courses, videos & documents</small></span></button>
+              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("people")}><Users size={18} /><span><strong>People</strong><small>Create or import accounts</small></span></button>
+              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("geography")}><MapPinned size={18} /><span><strong>Student geography</strong><small>See learners across India</small></span></button>
             </div>
           </section>
         </>
@@ -523,10 +517,14 @@ export default function AdminPage({
                   <small>{college.state || "—"} · {college.domains?.length ? college.domains.join(", ") : "no domains"}</small>
                   <div className="college-card-stats"><em>{college.departments.length} depts</em><em>{cTeachers} teachers</em><em>{cStudents} students</em></div>
                   <span className="college-card-cta">View structure →</span>
-                  {isAdmin && (
+                  {isStaff && (
                     <div className="college-card-actions">
-                      <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); setSelectedCollegeId(college._id); setAdminView("departments"); }}>Edit</button>
-                      <button className="danger-link" type="button" onClick={(e) => { e.stopPropagation(); setDeleteCollegeId(college._id); }}>Delete</button>
+                      {isAdmin && (
+                        <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); setEditCollege(college); setEditForm({ name: college.name, code: college.code, state: college.state || "", domains: (college.domains ?? []).join(", "), active: college.active }); setSelectedCollegeId(college._id); }}>Edit</button>
+                      )}
+                      {isAdmin && (
+                        <button className="danger-link" type="button" onClick={(e) => { e.stopPropagation(); setDeleteCollegeId(college._id); }}>Delete</button>
+                      )}
                     </div>
                   )}
                   {deleteCollegeId === college._id && (
@@ -540,8 +538,84 @@ export default function AdminPage({
               );
             })}
           </div>
-          {collegeStatus && <p className="college-status" role="status">{collegeStatus}</p>}
+          
         </section>
+      )}
+
+      {editCollege && (
+        <SidePanel title="Edit College" subtitle="Institution details" onClose={() => { setEditCollege(null); setEditForm(null); }} closeOnBackdrop={false}>
+          {editForm && (
+            <form className="create-college-card" onSubmit={(e) => {
+              e.preventDefault();
+              api.updateCollege(editCollege._id, {
+                name: editForm.name,
+                code: editForm.code,
+                state: editForm.state,
+                domains: editForm.domains,
+                active: editForm.active,
+              })
+                .then(({ college }) => {
+                  setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
+                  setEditCollege(null);
+                  setEditForm(null);
+                  success("College updated", `“${college.name}” has been revised.`);
+                })
+                .catch((err) => {
+                  const msg = err instanceof Error ? err.message : "Update failed.";
+                  error("Update failed", msg);
+                });
+            }}>
+              <h3>College details</h3>
+              <label>College name<input name="name" defaultValue={editForm.name} required placeholder="e.g. ABC Engineering College" /></label>
+              <div className="form-row">
+                <label>College code<input name="code" defaultValue={editForm.code} required maxLength={20} placeholder="ABCEC" /></label>
+                <label>State<select name="state" required defaultValue={editForm.state || ""}><option value="" disabled>Select state</option>{INDIA_STATES.map((state) => <option key={state}>{state}</option>)}</select></label>
+              </div>
+              <label>Email domains<input name="domains" defaultValue={editForm.domains} placeholder="abc.edu, drnpg.com (comma separated)" /><small className="field-hint">Accounts with these email domains are routed to this college.</small></label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input name="active" type="checkbox" defaultChecked={editForm.active} />
+                <span>Active</span>
+              </label>
+              <div className="panel-form-actions">
+                <button className="outline-small" type="button" onClick={() => { setEditCollege(null); setEditForm(null); }}>Cancel</button>
+                <button className="primary-button" type="submit">Save</button>
+              </div>
+            </form>
+          )}
+        </SidePanel>
+      )}
+
+      {deleteCollegeId && (
+        <SidePanel title="Delete College" subtitle="Confirm deletion" onClose={() => setDeleteCollegeId("")} closeOnBackdrop={false}>
+          <div className="delete-confirm-card">
+            <span className="delete-icon">⚠</span>
+            <h3>Delete College</h3>
+            <p>Delete “{colleges.find((c) => c._id === deleteCollegeId)?.name}”? This cannot be undone.</p>
+            <small className="warn-text">All departments, users, and courses under this college will be affected.</small>
+          </div>
+          <footer className="side-panel-footer">
+            <button className="text-button" type="button" onClick={() => setDeleteCollegeId("")}>Cancel</button>
+            <button className="danger-button" type="button" onClick={(e) => {
+              e.stopPropagation();
+              api.deleteCollege(deleteCollegeId)
+                .then(() => {
+                  setColleges((cur) => cur.filter((c) => c._id !== deleteCollegeId));
+                  setDeleteCollegeId("");
+                  if (selectedCollegeId === deleteCollegeId) {
+                    setSelectedCollegeId("");
+                    setSelectedDepartmentId("");
+                    setStructureCollegeId(null);
+                  }
+                  success("College deleted", "The college has been removed.");
+                })
+                .catch((err) => {
+                  const msg = err instanceof Error ? err.message : "Delete failed.";
+                  setDeleteCollegeId("");
+                  error("Delete failed", msg);
+                });
+            }}>Yes, delete</button>
+          </footer>
+        </SidePanel>
       )}
 
       {adminView === "departments" && isStaff && (
@@ -572,7 +646,7 @@ export default function AdminPage({
                   <div><strong>Email domains</strong><small>Route &amp; validate this college's accounts by email domain.</small></div>
                   <input value={domainsDraft} onChange={(e) => setDomainsDraft(e.target.value)} placeholder="abc.edu, drnpg.com" />
                   <button type="submit">Save domains</button>
-                  {domainsStatus && <span className="domains-status" role="status">{domainsStatus}</span>}
+                  
                 </form>
                 <form className="department-create-row" onSubmit={createDepartment}>
                   <div><strong>Add department</strong><small>Create CSE, ECE, Mechanical, or another department.</small></div>
@@ -584,11 +658,12 @@ export default function AdminPage({
                   {selectedCollege.departments.map((d) => {
                     const deptTeachers = users.filter((u) => u.role === "teacher" && String(u.departmentId) === String(d._id));
                     const deptStudents = users.filter((u) => u.role === "student" && String(u.departmentId) === String(d._id));
+                    const isEditing = false;
                     return (
-                      <button
-                        type="button"
+                      <div
                         key={d._id}
                         className={`department-card ${selectedDepartment?._id === d._id ? "active" : ""}`}
+                        style={{ cursor: "pointer" }}
                         onClick={() => setSelectedDepartmentId(d._id)}
                       >
                         <div className="dept-card-head"><strong>{d.code}</strong><span>{d.name}</span></div>
@@ -597,7 +672,11 @@ export default function AdminPage({
                           <em>{deptStudents.length} students</em>
                           <em>{d.allowedCourseIds.length} courses</em>
                         </div>
-                      </button>
+                        <div className="department-actions">
+                          <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); setEditDepartmentId({ collegeId: selectedCollege._id, departmentId: d._id, name: d.name, code: d.code }); }}>Edit</button>
+                          <button className="danger-link" type="button" onClick={(e) => { e.stopPropagation(); setDeleteDepartmentId({ collegeId: selectedCollege._id, departmentId: d._id }); }}>Delete</button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -661,8 +740,70 @@ export default function AdminPage({
               <div className="empty-state">Create a college to begin assigning course access.</div>
             )}
           </div>
-          {collegeStatus && <p className="college-status" role="status">{collegeStatus}</p>}
+          
         </section>
+      )}
+
+      {editDepartmentId && (
+        <SidePanel title="Edit Department" subtitle="Department details" onClose={() => setEditDepartmentId(null)} closeOnBackdrop={false}>
+          <form className="department-create-row" onSubmit={(e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            const name = String(formData.get("departmentName") ?? "").trim();
+            const code = String(formData.get("departmentCode") ?? "").trim().toUpperCase();
+            if (!name || !code) { error("Name and code are required."); return; }
+            api.updateCollegeDepartment(editDepartmentId.collegeId, editDepartmentId.departmentId, { name, code })
+              .then(({ college }) => {
+                setColleges((cur) => cur.map((c) => c._id === college._id ? college : c));
+                setEditDepartmentId(null);
+                success("Department updated", `“${name}” has been revised.`);
+              })
+              .catch((err) => {
+                error("Update failed", err instanceof Error ? err.message : "Update failed.");
+              });
+          }}>
+            <div><strong>Edit department</strong><small>Update department name and code.</small></div>
+            <input name="departmentName" defaultValue={editDepartmentId.name} required placeholder="Department name" />
+            <input name="departmentCode" defaultValue={editDepartmentId.code} required maxLength={15} placeholder="Code (CSE)" />
+            <div className="panel-form-actions">
+              <button className="outline-small" type="button" onClick={() => setEditDepartmentId(null)}>Cancel</button>
+              <button className="primary-button" type="submit">Save</button>
+            </div>
+          </form>
+        </SidePanel>
+      )}
+
+      {deleteDepartmentId && (
+        <SidePanel title="Delete Department" subtitle="Confirm deletion" onClose={() => setDeleteDepartmentId(null)} closeOnBackdrop={false}>
+          <div className="delete-confirm-card">
+            <span className="delete-icon">⚠</span>
+            <h3>Delete Department</h3>
+            <p>Delete “{selectedCollege?.departments.find((d) => d._id === deleteDepartmentId.departmentId)?.name}”? This cannot be undone.</p>
+            <small className="warn-text">All course access and user assignments for this department will be removed.</small>
+          </div>
+          <footer className="side-panel-footer">
+            <button className="text-button" type="button" onClick={() => setDeleteDepartmentId(null)}>Cancel</button>
+            <button className="danger-button" type="button" onClick={(e) => {
+              e.stopPropagation();
+              api.deleteCollegeDepartment(deleteDepartmentId.collegeId, deleteDepartmentId.departmentId)
+                .then(() => {
+                  setColleges((cur) => cur.map((c) => {
+                    if (c._id !== deleteDepartmentId.collegeId) return c;
+                    return {
+                      ...c,
+                      departments: c.departments.filter((dept) => dept._id !== deleteDepartmentId.departmentId),
+                    };
+                  }));
+                  setDeleteDepartmentId(null);
+                  if (selectedDepartment?._id === deleteDepartmentId.departmentId) setSelectedDepartmentId("");
+                  success("Department deleted", "The department has been removed.");
+                })
+                .catch((err) => {
+                  error("Delete failed", err instanceof Error ? err.message : "Delete failed.");
+                });
+            }}>Yes, delete</button>
+          </footer>
+        </SidePanel>
       )}
 
       {adminView === "content" && isStaff && (
@@ -732,7 +873,7 @@ export default function AdminPage({
                 ) : editingCourseId === course.slug ? (
                   <form className="management-edit" key={course.slug} onSubmit={updateCourse}>
                     <input type="hidden" name="id" value={course.slug} />
-                    <CourseFields initial={course} submitLabel="Save changes" onCancel={() => setEditingCourseId(null)} />
+                    <CourseFields initial={course} submitLabel="Save" onCancel={() => setEditingCourseId(null)} />
                   </form>
                 ) : (
                   <div className="management-item" key={course.slug}>
@@ -784,8 +925,8 @@ export default function AdminPage({
               <div className="tool-card-head"><span>01</span><div><span className="eyebrow">Access management</span><h2>Create a user login</h2></div></div>
               <div className="form-row"><label>Full name<input name="name" required placeholder="Teacher or student name" /></label><label>Account role<select name="role" defaultValue="student"><option value="student">Student</option><option value="teacher">Teacher</option>{isAdmin && <option value="collegeAdmin">College admin</option>}{isAdmin && <option value="admin">Administrator</option>}</select></label></div>
               <div className="form-row">
-                <label>College<select name="collegeId" value={userCollegeId} onChange={(e) => setUserCollegeId(e.target.value)}>{isAdmin && <option value="">No college / platform account</option>}{colleges.filter((c) => c.active).map((c) => <option value={c._id} key={c._id}>{c.code} — {c.name}</option>)}</select></label>
-                <label>Department<select name="departmentId" key={userCollegeId}><option value="">Select department</option>{colleges.find((c) => c._id === userCollegeId)?.departments.filter((d) => d.active).map((d) => <option value={d._id} key={d._id}>{d.code} — {d.name}</option>)}</select></label>
+                <label>College<select name="collegeId" value={isCollegeAdmin ? user?.collegeId || "" : userCollegeId} onChange={(e) => setUserCollegeId(e.target.value)} disabled={isCollegeAdmin}>{isAdmin && <option value="">No college / platform account</option>}{colleges.filter((c) => c.active).map((c) => <option value={c._id} key={c._id}>{c.code} — {c.name}</option>)}</select></label>
+                <label>Department<select name="departmentId"><option value="">Select department</option>{colleges.find((c) => c._id === (isCollegeAdmin ? user?.collegeId || "" : userCollegeId))?.departments.filter((d) => d.active).map((d) => <option value={d._id} key={d._id}>{d.code} — {d.name}</option>)}</select></label>
               </div>
               <label>Email<input name="email" type="email" required placeholder="user@example.com" /></label>
               <label>Temporary password<input name="password" type="password" minLength={10} required placeholder="Minimum 10 characters" /></label>
@@ -801,7 +942,7 @@ export default function AdminPage({
             <div className="bulk-import-controls">
               <label className="file-drop compact"><input type="file" accept=".xlsx,.xls,.csv" onChange={previewBulkUsers} /><span>Choose Excel or CSV file</span><small>.xlsx, .xls, or .csv · the Users worksheet will be imported</small></label>
               <label className="bulk-default-password">Default password (optional)<input type="text" value={defaultPassword} onChange={(e) => setDefaultPassword(e.target.value)} placeholder="Used for rows without a password" /><small>Re-importing an existing email overwrites that account.</small></label>
-              {bulkStatus && <p className="bulk-status" role="status">{bulkStatus}</p>}
+              
             </div>
             {bulkRows.length > 0 && (
               <>
@@ -876,7 +1017,7 @@ export default function AdminPage({
       )}
 
       {showCollegeForm && (
-        <SidePanel title="Add a college" subtitle="New institution" onClose={() => setShowCollegeForm(false)}>
+        <SidePanel title="Add a college" subtitle="New institution" onClose={() => setShowCollegeForm(false)} closeOnBackdrop={false}>
           <form className="create-college-card" onSubmit={createCollege}>
             <h3>College details</h3>
             <label>College name<input name="name" required placeholder="e.g. ABC Engineering College" /></label>
@@ -889,7 +1030,7 @@ export default function AdminPage({
               <button className="outline-small" type="button" onClick={() => setShowCollegeForm(false)}>Cancel</button>
               <button className="primary-button" type="submit">Create college <span>→</span></button>
             </div>
-            {collegeStatus && <p className="college-status" role="status">{collegeStatus}</p>}
+            
           </form>
         </SidePanel>
       )}
@@ -902,7 +1043,7 @@ export default function AdminPage({
             subtitle="College structure"
             title={<><span className="pill">{structureCollege.code}</span> {structureCollege.name}</>}
             onClose={() => setStructureCollegeId(null)}
-            footer={<button className="primary-button" type="button" onClick={() => { setSelectedCollegeId(structureCollege._id); setSelectedDepartmentId(""); setStructureCollegeId(null); setAdminView("departments"); }}>Manage course access <span>→</span></button>}
+            footer={<button className="primary-button" type="button" onClick={() => { setSelectedCollegeId(structureCollege._id); setSelectedDepartmentId(""); setStructureCollegeId(null); onNavigateToAdminView("departments"); }}>Manage course access <span>→</span></button>}
           >
             <div className="college-structure-meta">
               <span><strong>{structureCollege.departments.length}</strong> departments</span>
@@ -939,7 +1080,7 @@ export default function AdminPage({
         );
       })()}
 
-      {status && <p className="admin-status" role="status">{status}</p>}
+      
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { api } from "../../api/client";
 import CourseFields, { readCourseForm } from "../../components/CourseFields";
 import CurriculumBuilder from "../../components/CurriculumBuilder";
 import type { Asset, Course, View } from "../../types";
-import { useToast } from "../../context/ToastContext";
+import { usePopup } from "../../context/PopupContext";
 
 export default function TeacherCourses({
   setCourses,
@@ -25,7 +25,7 @@ export default function TeacherCourses({
   const [creating, setCreating] = useState(false);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [curriculumSlug, setCurriculumSlug] = useState<string | null>(null);
-  const { success, error } = useToast();
+  const { success, error } = usePopup();
 
   useEffect(() => {
     let cancelled = false;
@@ -167,7 +167,7 @@ export default function TeacherCourses({
             ) : editingSlug === course.slug ? (
               <form className="management-edit" key={course.slug} onSubmit={handleUpdate}>
                 <input type="hidden" name="id" value={course.slug} />
-                <CourseFields initial={course} submitLabel="Save changes" onCancel={() => setEditingSlug(null)} />
+                <CourseFields initial={course} submitLabel="Save" onCancel={() => setEditingSlug(null)} />
               </form>
             ) : (
               <div className="management-item" key={course.slug}>
@@ -194,9 +194,9 @@ export default function TeacherCourses({
           <button className="outline-small" type="button" onClick={() => goTo("admin")}>
             Upload content for these courses →
           </button>
-          <button className="outline-small" type="button" onClick={() => goTo("profile")}>
+          {/* <button className="outline-small" type="button" onClick={() => goTo("profile")}>
             Update your profile →
-          </button>
+          </button> */}
         </div>
       </section>
 

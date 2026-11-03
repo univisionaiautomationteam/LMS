@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import type { Language, RunMeta } from "../types";
 import { codeSamples, quizQuestions } from "../data/constants";
+import { usePopup } from "../context/PopupContext";
 
 export default function PracticePage() {
   const [language, setLanguage] = useState<Language>("python");
@@ -12,6 +13,7 @@ export default function PracticePage() {
   const [running, setRunning] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
   const [quizScore, setQuizScore] = useState<number | null>(null);
+  const { success } = usePopup();
 
   function changeLanguage(next: Language) {
     setLanguage(next);
@@ -86,7 +88,7 @@ export default function PracticePage() {
             <span>{language === "python" ? "main.py" : language === "java" ? "Main.java" : language === "cpp" ? "main.cpp" : "main.c"}</span>
             <div>
               <button type="button" onClick={() => { setCode(codeSamples[language]); setOutput("Starter code restored. Press Run when ready."); }}>Reset</button>
-              <button type="button" onClick={() => void navigator.clipboard.writeText(code)}>Copy code</button>
+              <button type="button" onClick={() => { navigator.clipboard.writeText(code).then(() => success("Code copied", "Code copied to clipboard.")); }}>Copy code</button>
               <kbd>⌘ Enter</kbd>
             </div>
           </div>
@@ -123,7 +125,7 @@ export default function PracticePage() {
           <button className="outline-button" onClick={() => setCode(codeSamples[language])}>Reset starter code</button>
         </section>
       </div>
-      <section className="quiz-card">
+      {/* <section className="quiz-card">
         <div className="quiz-head">
           <div><span className="eyebrow">Knowledge check</span><h2>Python foundations quiz</h2></div>
           {quizScore !== null && <div className="score-badge"><strong>{quizScore}/{quizQuestions.length}</strong><span>{quizScore === quizQuestions.length ? "Excellent" : "Keep practicing"}</span></div>}
@@ -133,7 +135,7 @@ export default function PracticePage() {
             <legend><span>{index + 1}</span>{item.q}</legend>
             <div className="answer-grid">
               {item.options.map((option, optionIndex) => (
-                <label className={quizScore !== null && optionIndex === item.answer ? "correct" : ""} key={option}>
+                <label className={`${quizScore !== null ? (optionIndex === item.answer ? "correct" : quizAnswers[index] === optionIndex ? "wrong" : "") : quizAnswers[index] === optionIndex ? "chosen" : ""}`} key={option}>
                   <input type="radio" name={`q-${index}`} checked={quizAnswers[index] === optionIndex}
                     onChange={() => { setQuizAnswers((cur) => ({ ...cur, [index]: optionIndex })); setQuizScore(null); }} />
                   <span>{String.fromCharCode(65 + optionIndex)}</span>{option}
@@ -143,7 +145,7 @@ export default function PracticePage() {
           </fieldset>
         ))}
         <button className="primary-button" onClick={submitQuiz} disabled={Object.keys(quizAnswers).length < quizQuestions.length}>Submit answers <span>→</span></button>
-      </section>
+      </section> */}
     </div>
   );
 }

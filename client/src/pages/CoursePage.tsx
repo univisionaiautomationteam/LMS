@@ -3,7 +3,7 @@ import type { Asset, Course, CourseProgress, Lesson } from "../types";
 import { api } from "../api/client";
 import { formatBytes, modulesOf } from "../data/constants";
 import QuizPanel from "../components/QuizPanel";
-import { useToast } from "../context/ToastContext";
+import { usePopup } from "../context/PopupContext";
 
 const lessonIcon = (type: Lesson["type"]) => (type === "video" ? "▶" : type === "quiz" ? "?" : type === "document" ? "▤" : "⌘");
 
@@ -26,7 +26,7 @@ export default function CoursePage({
   const [busy, setBusy] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [noteSaved, setNoteSaved] = useState("");
-  const { success, error } = useToast();
+  const { success, error } = usePopup();
 
   // A course ships its own modules; the bundled outline is only a fallback for a
   // demo/starter card that never reached the server.
@@ -80,6 +80,16 @@ export default function CoursePage({
     };
   }, [lessonAsset?._id, isQuiz]);
 
+  // Load saved note when course or lesson changes so notes persist across course switches.
+  useEffect(() => {
+    if (activeLesson?.key) {
+      const saved = localStorage.getItem("lms_note_" + course.slug + "_" + activeLesson.key);
+      setNoteText(saved ?? "");
+    } else {
+      setNoteText("");
+    }
+  }, [course.slug, activeLesson?.key]);
+
   const openDocument = useCallback(async (asset: Asset) => {
     const url = asset.objectKey ? (await api.assetUrl(asset._id)).url : asset.url;
     if (url) window.open(url, "_blank", "noopener");
@@ -129,13 +139,13 @@ export default function CoursePage({
               </button>
             </div>
             <div className="tab-row" role="tablist">
-              {(["overview", "resources", "notes"] as const).map((t) => (
+              {(["resources", "notes"] as const).map((t) => (
                 <button role="tab" aria-selected={tab === t} className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>
                   {t[0].toUpperCase() + t.slice(1)}
                 </button>
               ))}
             </div>
-            {tab === "overview" && (
+            {/* {tab === "overview" && (
               <div className="lesson-copy">
                 <h2>What you'll learn</h2>
                 <p>This lesson turns theory into understanding. Follow the explanation, pause to predict each result, and apply the concept through practical work.</p>
@@ -145,7 +155,7 @@ export default function CoursePage({
                 </div>
                 <button className="inline-lab" onClick={onOpenPractice}>Open practical lab <b>→</b></button>
               </div>
-            )}
+            )} */}
             {tab === "resources" && (
               <div className="resource-list">
                 <h2>Lesson resources</h2>

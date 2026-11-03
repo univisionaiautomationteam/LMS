@@ -1,9 +1,12 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import { User } from "./models/User.js";
-import { Course } from "./models/Course.js";
+import { CollegeAdmin } from "./models/CollegeAdmin.js";
+import { Teacher } from "./models/Teacher.js";
+import { Student } from "./models/Student.js";
 import { College } from "./models/College.js";
+import { Course } from "./models/Course.js";
+import { findUserByEmail } from "./utils/userLookup.js";
 
 /**
  * Creates a ready-to-use demo college with a college admin, teacher and
@@ -21,25 +24,37 @@ const CADMIN = { name: "Demo College Admin", email: "college.admin@demo.edu", pa
 const TEACHER = { name: "Demo Teacher", email: "teacher@demo.edu", password: "Teacher@2026" };
 const STUDENT = { name: "Demo Student", email: "student@demo.edu", password: "Student@2026" };
 
+const MODEL_BY_ROLE = {
+  collegeAdmin: CollegeAdmin,
+  teacher: Teacher,
+  student: Student,
+};
+
 async function upsertUser({ name, email, password, role, collegeId = null, departmentId = null, department = "" }) {
-  return User.findOneAndUpdate(
-    { email },
-    {
-      $set: {
-        name,
-        passwordHash: await bcrypt.hash(password, 10),
-        role,
-        collegeId,
-        departmentId,
-        department,
-        active: true,
-        mustChangePassword: false,
-        tokenVersion: 0,
-      },
-      $setOnInsert: { email, collegeNameLocked: false },
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+  const existing = await findUserByEmail(email);
+  const Model = MODEL_BY_ROLE[role];
+  if (existing) {
+    existing.name = name;
+    existing.passwordHash = await bcrypt.hash(password, 10);
+    existing.collegeId = collegeId;
+    existing.departmentId = departmentId;
+    existing.department = department;
+    existing.active = true;
+    existing.mustChangePassword = false;
+    existing.tokenVersion = 0;
+    await existing.save();
+    return existing;
+  }
+  return Model.create({
+    name,
+    email,
+    passwordHash: await bcrypt.hash(password, 10),
+    role,
+    mustChangePassword: false,
+    collegeId,
+    departmentId,
+    department,
+  });
 }
 
 async function seed() {
