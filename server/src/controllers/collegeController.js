@@ -1,20 +1,20 @@
 import bcrypt from "bcryptjs";
 import { College } from "../models/College.js";
 import { CollegeAdmin } from "../models/CollegeAdmin.js";
+import { Teacher } from "../models/Teacher.js";
+import { Student } from "../models/Student.js";
 import { findUserByEmail } from "../utils/userLookup.js";
 import { serverError, validateEmail, PASSWORD_MIN } from "../utils/helpers.js";
 import { isSuperAdmin, canAdminCollege } from "../utils/scope.js";
+import {
+  normalizeDomains,
+  findDomainConflict,
+  assertEmailAllowedForCollege,
+  emailDomain,
+} from "../utils/domains.js";
+import { statsForCollege } from "../utils/collegeStats.js";
 
-/** Turns "ABC.edu, xyz.com" into ["abc.edu", "xyz.com"] (lowercase, deduped). */
-function normalizeDomains(value) {
-  const list = Array.isArray(value) ? value : String(value ?? "").split(/[\s,;]+/);
-  const seen = new Set();
-  for (const raw of list) {
-    const domain = String(raw ?? "").trim().toLowerCase().replace(/^@+/, "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-    if (domain) seen.add(domain);
-  }
-  return [...seen];
-}
+export { normalizeDomains };
 
 export async function listColleges(req, res) {
   try {
@@ -53,11 +53,30 @@ export async function createCollege(req, res) {
       if (adminExists) return res.status(409).json({ error: "An account with this email already exists." });
     }
 
+    const domains = normalizeDomains(req.body.domains);
+    if (!domains.length) {
+      return res.status(400).json({ error: "Add at least one email domain (e.g. @abc.com) for this college." });
+    }
+    const conflict = await findDomainConflict(domains);
+    if (!conflict.ok) {
+      return res.status(409).json({
+        error: `@${conflict.domain} is already used by ${conflict.owner.code}. Each domain can belong to one college only.`,
+      });
+    }
+    if (wantsAdmin) {
+      const adminDomain = emailDomain(adminEmail);
+      if (!domains.includes(adminDomain)) {
+        return res.status(400).json({
+          error: `College admin email must use one of this college's domains (${domains.map((d) => `@${d}`).join(", ")}).`,
+        });
+      }
+    }
+
     const college = await College.create({
       name,
       code,
       state: String(req.body.state ?? "").trim(),
-      domains: normalizeDomains(req.body.domains),
+      domains,
     });
 
     let admin = null;
@@ -69,6 +88,8 @@ export async function createCollege(req, res) {
         role: "collegeAdmin",
         mustChangePassword: true,
         collegeId: college._id,
+        collegeNameLocked: true,
+        profile: { collegeName: name },
       });
     }
     res.status(201).json({ college: college.toPublic(), admin: admin ? admin.toPublic() : null });
@@ -180,13 +201,63 @@ export async function updateCollege(req, res) {
       if (!name) return res.status(400).json({ error: "College name is required." });
       college.name = name;
     }
+    if (req.body.code !== undefined) {
+      const code = String(req.body.code).trim().toUpperCase();
+      if (!code) return res.status(400).json({ error: "College code is required." });
+      if (code !== college.code) {
+        const taken = await College.findOne({ code });
+        if (taken && String(taken._id) !== String(college._id)) {
+          return res.status(409).json({ error: "A college with this code already exists." });
+        }
+        college.code = code;
+      }
+    }
     if (req.body.state !== undefined) college.state = String(req.body.state).trim();
-    if (req.body.domains !== undefined) college.domains = normalizeDomains(req.body.domains);
+    if (req.body.domains !== undefined) {
+      const domains = normalizeDomains(req.body.domains);
+      if (!domains.length) {
+        return res.status(400).json({ error: "Add at least one email domain (e.g. @abc.com)." });
+      }
+      const conflict = await findDomainConflict(domains, college._id);
+      if (!conflict.ok) {
+        return res.status(409).json({
+          error: `@${conflict.domain} is already used by ${conflict.owner.code}. Each domain can belong to one college only.`,
+        });
+      }
+      college.domains = domains;
+    }
     if (typeof req.body.active === "boolean") college.active = req.body.active;
     await college.save();
     res.json({ college: college.toPublic() });
   } catch (error) {
     serverError(res, error, "colleges.update");
+  }
+}
+
+export async function getCollegeStats(req, res) {
+  try {
+    const college = await College.findById(req.params.id);
+    if (!college) return res.status(404).json({ error: "College was not found." });
+    if (!isSuperAdmin(req.user) && !canAdminCollege(req.user, college._id)) {
+      return res.status(403).json({ error: "You can only view your own college." });
+    }
+    const stats = await statsForCollege(college._id);
+    res.json({ stats });
+  } catch (error) {
+    serverError(res, error, "colleges.stats");
+  }
+}
+
+export async function listCollegesWithStats(req, res) {
+  try {
+    if (!isSuperAdmin(req.user)) {
+      return res.status(403).json({ error: "Only the super admin can list all college statistics." });
+    }
+    const colleges = await College.find({}).sort({ name: 1 }).lean();
+    const stats = await Promise.all(colleges.map((c) => statsForCollege(c._id)));
+    res.json({ colleges: stats.filter(Boolean) });
+  } catch (error) {
+    serverError(res, error, "colleges.statsAll");
   }
 }
 

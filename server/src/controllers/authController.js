@@ -6,6 +6,7 @@ import { Student } from "../models/Student.js";
 import { findUserByEmail, findUserById } from "../utils/userLookup.js";
 import { signToken } from "../middleware/auth.js";
 import { validateEmail, serverError, ClientError, PASSWORD_MIN } from "../utils/helpers.js";
+import { assertLoginDomainAllowed } from "../utils/domains.js";
 
 const MODEL_BY_ROLE = {
   admin: Admin,
@@ -28,6 +29,9 @@ export async function login(req, res) {
     }
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: "Email or password is incorrect." });
+
+    const domainCheck = await assertLoginDomainAllowed(user, role);
+    if (!domainCheck.ok) return res.status(403).json({ error: domainCheck.error });
 
     const token = signToken(user, role);
 

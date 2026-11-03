@@ -24,13 +24,17 @@ export default function HomePage({
   onOpenCourse,
   availableCourses,
   summary,
+  collegeName,
 }: {
   onOpenCourse: (id: string) => void;
   availableCourses: Course[];
   summary: ProgressSummary | null;
+  collegeName?: string;
 }) {
   const { user } = useAuth();
   if (!user) return null;
+
+  const noCourses = availableCourses.length === 0;
 
   const inProgress = availableCourses.filter((c) => (c.progress ?? 0) > 0);
   const lessonsCompleted = summary?.lessonsCompleted ?? 0;
@@ -42,6 +46,19 @@ export default function HomePage({
 
   return (
     <div className="page-content home-page">
+      {noCourses && user.role === "student" && (
+        <section className="student-empty-banner" role="status">
+          <BookOpen size={28} aria-hidden />
+          <div>
+            <h2>No courses assigned yet</h2>
+            <p>
+              {collegeName
+                ? `${collegeName} has not granted any courses to your department yet. Ask your college admin to grant courses under Departments & Access.`
+                : "Your college has not assigned courses to your account yet. Contact your college administrator."}
+            </p>
+          </div>
+        </section>
+      )}
       <section className="hero-panel">
         <div className="hero-copy">
           <span className="hero-welcome"><Sparkles size={14} /> Your learning workspace</span>

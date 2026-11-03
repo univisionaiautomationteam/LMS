@@ -203,6 +203,17 @@ export type College = {
   departments: CollegeDepartment[];
 };
 
+export type CollegeStats = {
+  collegeId: string;
+  code: string;
+  name: string;
+  domains: string[];
+  departments: number;
+  teachers: number;
+  students: number;
+  collegeAdmins: number;
+};
+
 export type RunMeta = {
   status: string;
   mode: string;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api, roleLabel } from "../api/client";
 import { usePopup } from "../context/PopupContext";
@@ -8,15 +8,23 @@ import StudentProfileFields from "../components/profile/StudentProfileFields";
 
 export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
   const { user, setUser } = useAuth();
-  const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [institutionName, setInstitutionName] = useState(user?.profile?.collegeName ?? "");
   const profile = user?.profile;
   const { success, error } = usePopup();
+  const isCollegeAdmin = user?.role === "collegeAdmin";
+
+  useEffect(() => {
+    if (user?.role !== "collegeAdmin" || !user?.collegeId) return;
+    api
+      .getCollegeStats(user.collegeId)
+      .then(({ stats }) => setInstitutionName(stats.name))
+      .catch(() => {});
+  }, [user?.role, user?.collegeId]);
 
   if (!user) return null;
 
   const isSuperAdmin = user.role === "admin";
-  const isCollegeAdmin = user.role === "collegeAdmin";
   const isTeacher = user.role === "teacher";
   const isStudent = !isSuperAdmin && !isCollegeAdmin && !isTeacher;
 
@@ -38,17 +46,18 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
-    setStatus("");
     const form = new FormData(e.currentTarget);
     const payload: Record<string, unknown> = {
-      collegeName: String(form.get("collegeName") ?? "").trim(),
-      department: String(form.get("department") ?? "").trim(),
       state: String(form.get("state") ?? "").trim(),
       city: String(form.get("city") ?? "").trim(),
       pincode: String(form.get("pincode") ?? "").trim(),
       phone: String(form.get("phone") ?? "").trim(),
       about: String(form.get("about") ?? "").trim(),
     };
+    if (!isCollegeAdmin) {
+      payload.collegeName = String(form.get("collegeName") ?? "").trim();
+      payload.department = String(form.get("department") ?? "").trim();
+    }
     if (isTeacher) {
       payload["designation"] = String(form.get("designation") ?? "").trim();
       payload["qualification"] = String(form.get("qualification") ?? "").trim();
@@ -65,7 +74,6 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
     const confirm = String(form.get("confirmPassword") ?? "");
     if (password && password !== confirm) {
       setBusy(false);
-      setStatus("The new passwords do not match.");
       error("Save failed", "The new passwords do not match.");
       return;
     }
@@ -76,22 +84,18 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
     try {
       const { user: updated } = await api.updateProfile(payload);
       setUser(updated);
-      setStatus("Profile saved successfully.");
       success("Profile saved", "Your profile has been updated successfully.");
       onSaved();
     } catch (err: any) {
       const msg = err?.message ?? "Unable to save your profile.";
-      setStatus(msg);
       error("Save failed", msg);
     } finally {
       setBusy(false);
     }
   }
 
-  const lockedCollegeName = user.collegeNameLocked ? (user.profile?.collegeName ?? "") : "";
-  const department = isCollegeAdmin
-    ? profile?.department ?? ""
-    : user.department || profile?.department || "";
+  const lockedCollegeName = user.collegeNameLocked ? (user.profile?.collegeName ?? institutionName) : "";
+  const department = user.department || profile?.department || "";
 
   return (
     <div className="page-content profile-page">
@@ -101,7 +105,12 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
           <div>
             <span className="eyebrow accent">{isCollegeAdmin ? "College administrator profile" : "Account profile"}</span>
             <h1>{user.name}</h1>
-            <p className="profile-identity"><span>{roleLabel(user.role)}</span><span>{user.email}</span>{department && <span>Dept: {department}</span>}</p>
+            <p className="profile-identity">
+              <span>{roleLabel(user.role)}</span>
+              <span>{user.email}</span>
+              {isCollegeAdmin && institutionName && <span>{institutionName}</span>}
+              {!isCollegeAdmin && department && <span>Dept: {department}</span>}
+            </p>
           </div>
         </div>
         <section className="profile-form-section">
@@ -119,21 +128,26 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
             <label>Role<input value={roleLabel(user.role)} readOnly className="locked-profile-field" aria-label="Role" /></label>
           </div>
         </section>
-        <section className="profile-form-section">
-          <h2>College details</h2>
-          <div className="form-row">
-            <label>College name<input className={lockedCollegeName ? "locked-profile-field" : ""} name="collegeName" required readOnly={Boolean(lockedCollegeName)} defaultValue={lockedCollegeName || profile?.collegeName} placeholder="College or university" /></label>
-            {isCollegeAdmin ? (
-              <label>Department<input name="department" defaultValue={department} placeholder="e.g. Administration (optional)" /></label>
-            ) : (
+        {isCollegeAdmin ? (
+          <section className="profile-form-section profile-institution-banner">
+            <h2>Your institution</h2>
+            <p>
+              You manage <strong>{institutionName || "your college"}</strong>. College name and academic departments are set by the platform — update your personal contact details below.
+            </p>
+          </section>
+        ) : (
+          <section className="profile-form-section">
+            <h2>College details</h2>
+            <div className="form-row">
+              <label>College name<input className={lockedCollegeName ? "locked-profile-field" : ""} name="collegeName" required readOnly={Boolean(lockedCollegeName)} defaultValue={lockedCollegeName || profile?.collegeName} placeholder="College or university" /></label>
               <label>Department<input value={department} readOnly className="locked-profile-field" aria-label="Department" title="Set by your college administrator" placeholder="Assigned by your college admin" /></label>
-            )}
-          </div>
-        </section>
+            </div>
+          </section>
+        )}
         {isTeacher && <TeacherProfileFields details={profile?.teacher} />}
         {isStudent && <StudentProfileFields details={profile?.student} />}
         <section className="profile-form-section">
-          <h2>College location and contact</h2>
+          <h2>{isCollegeAdmin ? "Your location and contact" : "College location and contact"}</h2>
           <div className="form-row">
             <label>State<select name="state" required defaultValue={profile?.state ?? ""}><option value="" disabled>Select state</option>{INDIA_STATES.map((state) => <option key={state}>{state}</option>)}</select></label>
             <label>City<input name="city" required defaultValue={profile?.city} placeholder="College city" /></label>
@@ -147,7 +161,6 @@ export default function ProfilePage({ onSaved }: { onSaved: () => void }) {
           <h2>About you</h2>
           <label>About<textarea name="about" defaultValue={profile?.about} placeholder="Your interests, skills, and career goals" /></label>
         </section>
-        {status && <p className="profile-status" role="status">{status}</p>}
         <div className="profile-form-actions">
           <button className="text-button" type="button" onClick={onSaved}>Cancel</button>
           <button className="primary-button" type="submit" disabled={busy}>

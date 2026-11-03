@@ -42,9 +42,9 @@ export default function TeacherStudio({
     <div className="page-content admin-page">
       <section className="page-intro split admin-hero">
         <div>
-          <span className="eyebrow accent">Content studio</span>
-          <h1>Publish course content.</h1>
-          <p>Upload recorded lessons and reference documents for your own courses. Learners permitted to access the course will see them straight away.</p>
+          <span className="eyebrow accent">Upload studio</span>
+          <h1>Upload for your department courses.</h1>
+          <p>Videos and documents for courses you created in your department. Pick a course you own — learners see uploads only after your college admin grants the course.</p>
         </div>
         <div className="hero-actions">
           <button className="primary-small" type="button" onClick={() => goTo("teacherCourses")}>Manage courses</button>

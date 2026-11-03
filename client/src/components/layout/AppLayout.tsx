@@ -14,6 +14,7 @@ import TeacherStudio from "../../pages/teacher/TeacherStudio";
 import TeacherDashboard from "../../pages/teacher/TeacherDashboard";
 import TeacherCourses from "../../pages/teacher/TeacherCourses";
 import WeeklyGoalCard from "../WeeklyGoalCard";
+import { isProfileIncomplete } from "../../utils/profileComplete";
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
@@ -84,7 +85,11 @@ export default function AppLayout() {
       .then(([courseResult, assetResult, collegeResult, progressResult]) => {
         // Students take the server-scoped list verbatim (even when empty) so the
         // demo catalog cannot stand in for courses they were never granted.
-        if (!isStudent || courseResult.courses.length) setCourses(courseResult.courses);
+        if (isStudent) {
+          if (courseResult.courses.length) setCourses(courseResult.courses);
+        } else {
+          setCourses(courseResult.courses);
+        }
         setAssets(assetResult.assets);
         setColleges(collegeResult.colleges);
         setProgress(progressResult.progress);
@@ -93,20 +98,21 @@ export default function AppLayout() {
       .catch(() => {
         setAssets([]);
         setColleges([]);
+        if (user?.role !== "student") setCourses([]);
       });
   }, [user?.role]);
 
   const navItems: { id: View; label: string; mark: React.ReactNode }[] =
     isAdminLike
       ? [
-          { id: "admin", label: isSuperAdmin ? "Dashboard" : "College dashboard", mark: <HomeIcon size={18} strokeWidth={1.9} /> },
-          { id: "profile", label: isSuperAdmin ? "Admin profile" : "College profile", mark: <UserRound size={18} strokeWidth={1.9} /> },
+          { id: "admin", label: isSuperAdmin ? "Platform dashboard" : "College dashboard", mark: <HomeIcon size={18} strokeWidth={1.9} /> },
+          { id: "profile", label: isSuperAdmin ? "Admin profile" : "Your profile", mark: <UserRound size={18} strokeWidth={1.9} /> },
         ]
       : user?.role === "teacher"
       ? [
           { id: "teacher", label: "My dashboard", mark: <GraduationCap size={18} strokeWidth={1.9} /> },
           { id: "teacherCourses", label: "My courses", mark: <BookOpen size={18} strokeWidth={1.9} /> },
-          { id: "admin", label: "Content studio", mark: <FileUp size={18} strokeWidth={1.9} /> },
+          { id: "admin", label: "Upload studio", mark: <FileUp size={18} strokeWidth={1.9} /> },
           { id: "profile", label: "My profile", mark: <UserRound size={18} strokeWidth={1.9} /> },
         ]
       : [
@@ -188,6 +194,8 @@ export default function AppLayout() {
 
   if (!user) return null;
 
+  const profileIncomplete = isProfileIncomplete(user);
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -219,7 +227,10 @@ export default function AppLayout() {
         ) : null}
         <button className="profile-chip" onClick={() => navigate("profile")}>
           <span>{user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}</span>
-          <div><strong>{user.name}</strong><small>{roleLabel(user.role)}</small></div>
+          <div>
+            <strong>{user.name}</strong>
+            <small>{roleLabel(user.role)}{profileIncomplete ? " · Profile incomplete" : ""}</small>
+          </div>
         </button>
       </aside>
 
@@ -253,14 +264,26 @@ export default function AppLayout() {
             )} */}
             <button className="top-profile-button" onClick={() => navigate("profile")} aria-label={`Open ${user.name} profile`}>
               <b>{user.name.slice(0, 1).toUpperCase()}</b>
-              <span><strong>{user.name.split(" ")[0]}</strong><small>{user.role}</small></span>
+              <span>
+                <strong>{user.name.split(" ")[0]}</strong>
+                <small>{user.role}{profileIncomplete ? " · complete profile" : ""}</small>
+              </span>
             </button>
             <button className="signout-button" onClick={logout}>Sign out</button>
           </div>
         </header>
 
-        {view === "home" && <HomePage onOpenCourse={openCourse} availableCourses={availableCourses} summary={summary} />}
-        {view === "catalog" && <CatalogPage search={search} openCourse={openCourse} availableCourses={availableCourses} />}
+        {view === "home" && (
+          <HomePage
+            onOpenCourse={openCourse}
+            availableCourses={availableCourses}
+            summary={summary}
+            collegeName={assignedCollege?.name}
+          />
+        )}
+        {view === "catalog" && (
+          <CatalogPage search={search} openCourse={openCourse} availableCourses={availableCourses} collegeName={assignedCollege?.name} />
+        )}
         {view === "course" && (
           <CoursePage
             key={courseId}

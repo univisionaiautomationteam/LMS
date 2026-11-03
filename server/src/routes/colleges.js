@@ -1,10 +1,12 @@
 import { Router } from "express";
 import authRequired from "../middleware/auth.js";
-import { listColleges, createCollege, updateCollege, addDepartment, updateDepartment, deleteDepartment, updateDepartmentAccess, deleteCollege } from "../controllers/collegeController.js";
+import { listColleges, createCollege, updateCollege, addDepartment, updateDepartment, deleteDepartment, updateDepartmentAccess, deleteCollege, getCollegeStats, listCollegesWithStats } from "../controllers/collegeController.js";
 
 const router = Router();
 
 router.get("/", authRequired(), listColleges);
+router.get("/stats/summary", authRequired(["admin"]), listCollegesWithStats);
+router.get("/:id/stats", authRequired(["admin", "collegeAdmin"]), getCollegeStats);
 router.post("/", authRequired(["admin"]), createCollege);
 router.put("/:id", authRequired(["admin", "collegeAdmin"]), updateCollege);
 router.post("/:id/departments", authRequired(["admin", "collegeAdmin"]), addDepartment);

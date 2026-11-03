@@ -123,6 +123,12 @@ export function profileDetailBucket(role) {
 }
 
 export function requiredProfileFields(role) {
+  if (role === "collegeAdmin") {
+    return ["state", "city", "phone"];
+  }
+  if (role === "admin") {
+    return [];
+  }
   return [...REQUIRED_SHARED_FIELDS, ...REQUIRED_ROLE_FIELDS[profileRole(role)]];
 }
 

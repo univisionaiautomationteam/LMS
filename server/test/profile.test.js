@@ -174,14 +174,21 @@ test("an unknown role falls back to the student allowlist", () => {
 });
 
 test("admin has no role fields to fill", () => {
-  assert.deepEqual(requiredProfileFields("admin"), [
-    "collegeName",
-    "department",
-    "state",
-    "city",
-    "phone",
-  ]);
+  assert.deepEqual(requiredProfileFields("admin"), []);
   const { profile } = buildProfile({ ...teacherPayload, designation: "X" }, {}, "admin");
   assert.deepEqual(profile.student, {});
   assert.deepEqual(profile.teacher, {});
+});
+
+test("college admin only requires personal contact fields", () => {
+  assert.deepEqual(requiredProfileFields("collegeAdmin"), ["state", "city", "phone"]);
+  const { profile, missing } = buildProfile(
+    { state: "Tamil Nadu", city: "Coimbatore", phone: "9876543210", collegeName: "ABC Engineering College" },
+    {},
+    "collegeAdmin",
+    "ABC Engineering College"
+  );
+  assert.equal(missing, null);
+  assert.equal(profile.complete, true);
+  assert.equal(profile.collegeName, "ABC Engineering College");
 });

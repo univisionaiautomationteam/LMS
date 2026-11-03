@@ -56,7 +56,7 @@ export default function CourseFields({
           <input name="icon" maxLength={3} defaultValue={initial?.icon} placeholder="AE" />
         </label>
       </div>
-      <div className="form-row">
+      {/* <div className="form-row">
         <label>
           Lessons
           <input name="lessons" type="number" min={1} max={999} defaultValue={initial?.lessons ?? 24} />
@@ -65,7 +65,7 @@ export default function CourseFields({
           Duration
           <input name="duration" defaultValue={initial?.duration ?? "8h 00m"} placeholder="8h 00m" />
         </label>
-      </div>
+      </div> */}
       <div className="management-actions">
         <button className="primary-button" type="submit">
           {submitLabel} <span>→</span>

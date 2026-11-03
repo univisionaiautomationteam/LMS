@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { BookOpen, Building2, GraduationCap, Layers, Library, MapPinned, Users } from "lucide-react";
 import { api, courseAuthorLabel } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { usePopup } from "../context/PopupContext";
-import type { Asset, AuthUser, College, Course, AdminView } from "../types";
+import type { Asset, AuthUser, College, CollegeStats, Course, AdminView } from "../types";
+import { formatDomainList, emailMatchesDomains, parseDomainsInput } from "../utils/domains";
 import { INDIA_STATES } from "../data/constants";
 import AdminStudentMap from "../components/AdminStudentMap";
 import AssetUploader from "../components/AssetUploader";
@@ -12,6 +13,8 @@ import AssetTable from "../components/AssetTable";
 import CourseFields, { readCourseForm } from "../components/CourseFields";
 import CurriculumBuilder from "../components/CurriculumBuilder";
 import SidePanel from "../components/SidePanel";
+import ConfirmDialog from "../components/ConfirmDialog";
+import ListSkeleton from "../components/ListSkeleton";
 
 type BulkRow = {
   row: number;
@@ -50,7 +53,6 @@ export default function AdminPage({
   const { user } = useAuth();
   const [deleteCollegeId, setDeleteCollegeId] = useState("");
   const [editCollege, setEditCollege] = useState<College | null>(null);
-  const [editForm, setEditForm] = useState<{ name: string; code: string; state: string; domains: string; active: boolean } | null>(null);
   const [editDepartmentId, setEditDepartmentId] = useState<{ collegeId: string; departmentId: string; name: string; code: string } | null>(null);
   const [deleteDepartmentId, setDeleteDepartmentId] = useState<{ collegeId: string; departmentId: string } | null>(null);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
@@ -59,6 +61,8 @@ export default function AdminPage({
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("");
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [curriculumCourseId, setCurriculumCourseId] = useState<string | null>(null);
+  const [curriculumReloadKey, setCurriculumReloadKey] = useState("");
+  const [collegeSaving, setCollegeSaving] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userCollegeId, setUserCollegeId] = useState(user?.collegeId ?? "");
   const [defaultPassword, setDefaultPassword] = useState("");
@@ -66,6 +70,21 @@ export default function AdminPage({
   const [showCollegeForm, setShowCollegeForm] = useState(false);
   const [structureCollegeId, setStructureCollegeId] = useState<string | null>(null);
   const [pushTargets, setPushTargets] = useState<Record<string, boolean>>({});
+  const [collegeStatsSummary, setCollegeStatsSummary] = useState<CollegeStats[]>([]);
+  const [myCollegeStats, setMyCollegeStats] = useState<CollegeStats | null>(null);
+  const [peopleCollegeFilter, setPeopleCollegeFilter] = useState("");
+  const [deptSummaryCollegeFilter, setDeptSummaryCollegeFilter] = useState("");
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [collegeWizardStep, setCollegeWizardStep] = useState(1);
+  const [collegeWizardDraft, setCollegeWizardDraft] = useState({ name: "", code: "", state: "", domains: "" });
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    danger?: boolean;
+    confirmLabel?: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const { success, error, info } = usePopup();
 
   // Super admin runs the whole platform (creates colleges, courses, assets);
@@ -75,16 +94,46 @@ export default function AdminPage({
   const isStaff = isAdmin || isCollegeAdmin;
 
   useEffect(() => {
+    setUsersLoading(true);
     api
       .listUsers()
       .then(({ users }) => setUsers(users))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setUsersLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (isAdmin) {
+      api
+        .listCollegesStatsSummary()
+        .then(({ colleges: rows }) => setCollegeStatsSummary(rows))
+        .catch(() => {});
+    } else if (isCollegeAdmin && user?.collegeId) {
+      api
+        .getCollegeStats(user.collegeId)
+        .then(({ stats }) => setMyCollegeStats(stats))
+        .catch(() => {});
+    }
+  }, [isAdmin, isCollegeAdmin, user?.collegeId]);
+
+  const statsByCollegeId = useMemo(
+    () => new Map(collegeStatsSummary.map((row) => [row.collegeId, row])),
+    [collegeStatsSummary]
+  );
 
   const selectedCollege = colleges.find((c) => c._id === selectedCollegeId) ?? colleges[0];
   const selectedDepartment = selectedCollege?.departments.find((d) => d._id === selectedDepartmentId) ?? selectedCollege?.departments[0];
   const q = search.toLowerCase();
-  const directoryUsers = users.filter((u) => u.role !== "admin" && (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.department || "").toLowerCase().includes(q)));
+  const directoryUsers = users.filter((u) => {
+    if (u.role === "admin") return false;
+    if (isAdmin && peopleCollegeFilter && String(u.collegeId ?? "") !== peopleCollegeFilter) return false;
+    if (!q) return true;
+    return (
+      u.name.toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q) ||
+      (u.department || "").toLowerCase().includes(q)
+    );
+  });
   const locatedStudents = directoryUsers.filter((u) => u.role === "student" && u.profile?.complete && u.profile.state);
   const structureCollege = colleges.find((c) => c._id === structureCollegeId) ?? null;
   const students = directoryUsers.filter((u) => u.role === "student");
@@ -105,6 +154,25 @@ export default function AdminPage({
     setDomainsDraft((selectedCollege?.domains ?? []).join(", "));
   }, [selectedCollege?._id, selectedCollege?.domains?.join(",")]);
 
+  const pushColleges = isAdmin
+    ? colleges
+    : colleges.filter((c) => String(c._id) === String(user?.collegeId ?? ""));
+
+  const scopeColleges = isCollegeAdmin
+    ? colleges.filter((c) => String(c._id) === String(user?.collegeId ?? ""))
+    : colleges;
+
+  const unassignedCourseCount = useMemo(() => {
+    const granted = new Set<string>();
+    for (const college of scopeColleges) {
+      for (const dept of college.departments) {
+        for (const slug of dept.allowedCourseIds ?? []) granted.add(slug);
+      }
+    }
+    const pool = isCollegeAdmin ? contentCourses : courses;
+    return pool.filter((c) => !granted.has(c.slug)).length;
+  }, [scopeColleges, courses, contentCourses, isCollegeAdmin]);
+
   if (!user) return null;
 
   async function createCourse(e: React.FormEvent<HTMLFormElement>) {
@@ -112,28 +180,34 @@ export default function AdminPage({
     const formEl = e.currentTarget;
     const values = readCourseForm(new FormData(formEl));
     if (!values.title) {
-      error("Course title is required.");
+      error("Create failed", "Course title is required.");
       return;
     }
     try {
-      const { course } = await api.createCourse(values);
+      const targetDeptIds = Object.entries(pushTargets)
+        .filter(([, on]) => on)
+        .map(([id]) => id);
+      const payload = { ...values, departmentIds: targetDeptIds };
+      const { course, departmentsGranted } = await api.createCourse(payload) as {
+        course: Course;
+        departmentsGranted?: number;
+      };
       setCourses((cur) => [course, ...cur]);
-      // Super admin can grant the new course to chosen departments in the same step.
-      const targetDeptIds = Object.entries(pushTargets).filter(([, on]) => on).map(([id]) => id);
-      let pushed = 0;
-      for (const college of colleges) {
-        for (const dept of college.departments.filter((d) => targetDeptIds.includes(d._id))) {
-          const next = Array.from(new Set([...(dept.allowedCourseIds ?? []), course.slug]));
-          try {
-            const { college: updated } = await api.updateDepartmentAccess(college._id, dept._id, { allowedCourseIds: next, active: true });
-            setColleges((cur) => cur.map((c) => (c._id === updated._id ? updated : c)));
-            pushed += 1;
-          } catch {
-            // Keep pushing to the remaining departments if one fails.
-          }
-        }
+      const pushed = departmentsGranted ?? 0;
+      if (pushed > 0) {
+        api
+          .listColleges()
+          .then(({ colleges: fresh }) => setColleges(fresh))
+          .catch(() => {});
       }
-      success("Course created", pushed ? `“${course.title}” is live and pushed to ${pushed} department(s).` : `“${course.title}” is live.`);
+      success(
+        "Course created",
+        pushed
+          ? `“${course.title}” is live for ${pushed} department(s). Only those departments' teachers and students will see it.`
+          : isAdmin
+            ? `“${course.title}” is live. Assign departments under Departments & Access so learners can see it.`
+            : `“${course.title}” is live. Tick departments when creating, or assign access under Departments & Access.`
+      );
       formEl.reset();
       setPushTargets({});
     } catch (err) {
@@ -147,11 +221,11 @@ export default function AdminPage({
     const form = new FormData(formEl);
     try {
       const role = String(form.get("role") ?? "student");
-      const collegeId = String(form.get("collegeId") ?? "");
+      const collegeId = isCollegeAdmin ? String(user?.collegeId ?? "") : String(form.get("collegeId") ?? "");
+      const email = String(form.get("email") ?? "").trim().toLowerCase();
       const departmentId = String(form.get("departmentId") ?? "");
-      const department = colleges
-        .find((c) => c._id === collegeId)
-        ?.departments.find((d) => d._id === departmentId)?.name ?? "";
+      const targetCollege = colleges.find((c) => c._id === collegeId);
+      const department = targetCollege?.departments.find((d) => d._id === departmentId)?.name ?? "";
       if (role === "student" && !collegeId) throw new Error("Select a college for this student account.");
       if ((role === "student" || role === "teacher") && !departmentId) {
         throw new Error(`Select a department for this ${role} account.`);
@@ -159,17 +233,30 @@ export default function AdminPage({
       if (role === "collegeAdmin" && !collegeId) {
         throw new Error("Select a college for this college admin account.");
       }
+      if (role !== "admin" && targetCollege) {
+        if (!targetCollege.domains?.length) {
+          throw new Error("Save email domains for this college first (e.g. @abc.com).");
+        }
+        if (!emailMatchesDomains(email, targetCollege.domains)) {
+          throw new Error(`Email must use ${formatDomainList(targetCollege.domains)}.`);
+        }
+      }
       const { user: created } = await api.createUser({
         name: form.get("name"),
-        email: form.get("email"),
+        email,
         role,
         temporaryPassword: form.get("password"),
-        collegeId,
+        collegeId: role === "admin" ? "" : collegeId,
         departmentId,
         department,
       });
       setUsers((cur) => [created, ...cur]);
-      success("User created", `Login created for ${created.name} (${created.email}).`);
+      success("User created", `${created.name} (${created.email}) was added.`);
+      if (isAdmin) {
+        api.listCollegesStatsSummary().then(({ colleges: rows }) => setCollegeStatsSummary(rows)).catch(() => {});
+      } else if (user?.collegeId) {
+        api.getCollegeStats(user.collegeId).then(({ stats }) => setMyCollegeStats(stats)).catch(() => {});
+      }
       formEl.reset();
       setUserCollegeId("");
     } catch (err) {
@@ -177,27 +264,52 @@ export default function AdminPage({
     }
   }
 
-  async function createCollege(e: React.FormEvent<HTMLFormElement>) {
+  async function submitCollegeWizard(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formEl = e.currentTarget;
     const form = new FormData(formEl);
+    if (collegeWizardStep === 1) {
+      const draft = {
+        name: String(form.get("name") ?? "").trim(),
+        code: String(form.get("code") ?? "").trim(),
+        state: String(form.get("state") ?? "").trim(),
+        domains: String(form.get("domains") ?? "").trim(),
+      };
+      if (!draft.name || !draft.code || !draft.state || !draft.domains) {
+        error("Missing details", "Fill college name, code, state, and email domains to continue.");
+        return;
+      }
+      setCollegeWizardDraft(draft);
+      setCollegeWizardStep(2);
+      return;
+    }
     try {
+      const domains = parseDomainsInput(collegeWizardDraft.domains);
+      if (!domains.length) throw new Error("Add at least one email domain (e.g. @abc.com).");
+      const adminEmail = String(form.get("adminEmail") ?? "").trim();
+      if (!emailMatchesDomains(adminEmail, domains)) {
+        throw new Error(`College admin email must use ${formatDomainList(domains)}.`);
+      }
       const { college, admin } = await api.createCollege({
-        name: form.get("name"),
-        code: form.get("code"),
-        state: form.get("state"),
-        domains: form.get("domains"),
+        name: collegeWizardDraft.name,
+        code: collegeWizardDraft.code,
+        state: collegeWizardDraft.state,
+        domains,
         adminName: form.get("adminName"),
-        adminEmail: form.get("adminEmail"),
+        adminEmail,
         adminPassword: form.get("adminPassword"),
       });
       setColleges((cur) => [college, ...cur]);
       if (admin) setUsers((cur) => [admin, ...cur]);
       setSelectedCollegeId(college._id);
       setDomainsDraft((college.domains ?? []).join(", "));
-      success("College created", admin ? `${college.name} created with college admin ${admin.email}. Now add its first department.` : `${college.name} created. Now add its first department.`);
+      api.listCollegesStatsSummary().then(({ colleges: rows }) => setCollegeStatsSummary(rows)).catch(() => {});
+      success("College created", admin ? `${college.name} is live. Next: add a department and grant courses.` : `${college.name} is live. Add a department next.`);
       formEl.reset();
       setShowCollegeForm(false);
+      setCollegeWizardStep(1);
+      setCollegeWizardDraft({ name: "", code: "", state: "", domains: "" });
+      onNavigateToAdminView("departments");
     } catch (err) {
       error("Create failed", err instanceof Error ? err.message : "Unable to create college.");
     }
@@ -244,10 +356,15 @@ export default function AdminPage({
     e.preventDefault();
     if (!selectedCollege) return;
     try {
-      const { college } = await api.updateCollege(selectedCollege._id, { domains: domainsDraft });
+      const { college } = await api.updateCollege(selectedCollege._id, { domains: parseDomainsInput(domainsDraft) });
       setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
       setDomainsDraft((college.domains ?? []).join(", "));
-      success("Domains saved", `Email domains updated for ${selectedCollege.name}.`);
+      success("Domains saved", `Allowed emails: ${formatDomainList(college.domains)}`);
+      if (isAdmin) {
+        api.listCollegesStatsSummary().then(({ colleges: rows }) => setCollegeStatsSummary(rows)).catch(() => {});
+      } else if (user?.collegeId) {
+        api.getCollegeStats(user.collegeId).then(({ stats }) => setMyCollegeStats(stats)).catch(() => {});
+      }
     } catch (err) {
       error("Save failed", err instanceof Error ? err.message : "Unable to save domains.");
     }
@@ -291,8 +408,11 @@ export default function AdminPage({
         if (password.length < 10) issues.push("password (or default) must have 10+ characters");
         if ((role === "student" || role === "teacher") && !collegeId) issues.push("valid College Code is required");
         if ((role === "student" || role === "teacher") && !departmentId) issues.push("valid Department name or code is required");
-        if (matchedCollege && matchedCollege.domains?.length && emailDomain && !matchedCollege.domains.includes(emailDomain)) {
-          issues.push(`email domain @${emailDomain} is not allowed for ${matchedCollege.code}`);
+        if (matchedCollege && matchedCollege.domains?.length && emailDomain) {
+          const allowed = new Set(matchedCollege.domains.map((d) => d.toLowerCase()));
+          if (!allowed.has(emailDomain)) {
+            issues.push(`email must use ${formatDomainList(matchedCollege.domains)}`);
+          }
         }
         return { row: index + 2, name, email, role, password, studentId, department, collegeId, valid: issues.length === 0, issue: issues.join("; ") };
       });
@@ -314,6 +434,11 @@ export default function AdminPage({
       success("Bulk import complete", `${result.created} created · ${result.updated} updated · ${result.rejected.length} rejected.`);
       setBulkRows([]);
       api.listUsers().then(({ users }) => setUsers(users)).catch(() => {});
+      if (isAdmin) {
+        api.listCollegesStatsSummary().then(({ colleges: rows }) => setCollegeStatsSummary(rows)).catch(() => {});
+      } else if (user?.collegeId) {
+        api.getCollegeStats(user.collegeId).then(({ stats }) => setMyCollegeStats(stats)).catch(() => {});
+      }
     } catch (err) {
       error("Import failed", err instanceof Error ? err.message : "Bulk import failed.");
     }
@@ -331,6 +456,23 @@ export default function AdminPage({
     info("Template downloaded", "Replace the sample learner details before upload.");
   }
 
+  async function loadCurriculumEditor(slug: string) {
+    const existing = courses.find((c) => c.slug === slug);
+    if (!existing) {
+      error("Load failed", "Course not found in the catalog.");
+      return;
+    }
+    try {
+      const { course: fresh } = await api.getCourse(existing._id ?? existing.slug);
+      setCourses((items) => items.map((c) => (c.slug === fresh.slug || c._id === fresh._id ? fresh : c)));
+      setEditingCourseId(null);
+      setCurriculumCourseId(fresh.slug);
+      setCurriculumReloadKey(`${fresh.slug}-${fresh.updatedAt ?? Date.now()}`);
+    } catch (err) {
+      error("Load failed", err instanceof Error ? err.message : "Could not load this course from the server.");
+    }
+  }
+
   async function updateCourse(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -346,14 +488,28 @@ export default function AdminPage({
   }
 
   async function deleteCourse(id: string) {
-    if (!window.confirm("Delete this course from the catalog?")) return;
-    try {
-      await api.deleteCourse(id);
-      setCourses((items) => items.filter((c) => c._id !== id && c.slug !== id));
-      success("Course deleted", "The course has been removed from the catalog.");
-    } catch (err) {
-      error("Delete failed", err instanceof Error ? err.message : "Course deletion failed.");
-    }
+    const target = courses.find((c) => c._id === id || c.slug === id);
+    setConfirmDialog({
+      title: "Delete this course?",
+      message: target
+        ? `“${target.title}” will be removed from the catalog and unlinked from every department grant.`
+        : "This course will be removed from the catalog.",
+      danger: true,
+      confirmLabel: "Delete course",
+      onConfirm: async () => {
+        setConfirmBusy(true);
+        try {
+          await api.deleteCourse(id);
+          setCourses((items) => items.filter((c) => c._id !== id && c.slug !== id));
+          success("Course deleted", "The course has been removed from the catalog.");
+        } catch (err) {
+          error("Delete failed", err instanceof Error ? err.message : "Course deletion failed.");
+        } finally {
+          setConfirmBusy(false);
+          setConfirmDialog(null);
+        }
+      },
+    });
   }
 
   async function handleDeleteCollege(id: string) {
@@ -374,16 +530,26 @@ export default function AdminPage({
     }
   }
 
-  async function deleteUser(authUser: AuthUser) {
-    if (!window.confirm(`Delete ${authUser.name} (${authUser.email})?`)) return;
-    try {
-      await api.deleteUser(authUser._id);
-      setUsers((cur) => cur.filter((u) => u._id !== authUser._id));
-      success("User deleted", `${authUser.name}'s account has been removed.`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "User deletion failed.";
-      error("Delete failed", msg);
-    }
+  function deleteUser(authUser: AuthUser) {
+    setConfirmDialog({
+      title: "Delete this account?",
+      message: `${authUser.name} (${authUser.email}) will lose access immediately. This cannot be undone.`,
+      danger: true,
+      confirmLabel: "Delete account",
+      onConfirm: async () => {
+        setConfirmBusy(true);
+        try {
+          await api.deleteUser(authUser._id);
+          setUsers((cur) => cur.filter((u) => u._id !== authUser._id));
+          success("User deleted", `${authUser.name}'s account has been removed.`);
+        } catch (err) {
+          error("Delete failed", err instanceof Error ? err.message : "User deletion failed.");
+        } finally {
+          setConfirmBusy(false);
+          setConfirmDialog(null);
+        }
+      },
+    });
   }
 
   async function changeUserDepartment(authUser: AuthUser, departmentId: string) {
@@ -398,13 +564,13 @@ export default function AdminPage({
     }
   }
 
-  const views: { id: AdminView; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    ...(isAdmin ? [{ id: "colleges" as AdminView, label: "Colleges" }] : []),
-    { id: "departments", label: "Departments & Access" },
-    { id: "content", label: "Content Library" },
-    { id: "people", label: "People" },
-    { id: "geography", label: "Student Geography" },
+  const views: { id: AdminView; label: string; title?: string }[] = [
+    { id: "overview", label: "Overview", title: "Summary and quick actions" },
+    ...(isAdmin ? [{ id: "colleges" as AdminView, label: "Colleges", title: "Institutions and email domains" }] : []),
+    { id: "departments", label: "Course access", title: "Grant courses to each department" },
+    { id: "content", label: "Courses & files", title: "Create courses and upload videos or documents" },
+    { id: "people", label: "People", title: "Teachers, students, and bulk import" },
+    { id: "geography", label: "Map", title: "Student locations across India" },
   ];
 
   return (
@@ -424,6 +590,7 @@ export default function AdminPage({
             type="button"
             className={`admin-tab ${adminView === view.id ? "active" : ""}`}
             onClick={() => onNavigateToAdminView(view.id)}
+            title={view.title}
           >
             {view.label}
           </button>
@@ -432,6 +599,67 @@ export default function AdminPage({
 
       {adminView === "overview" && isStaff && (
         <>
+          {unassignedCourseCount > 0 && (
+            <section className="admin-alert admin-alert-warning">
+              <strong>{unassignedCourseCount} course{unassignedCourseCount === 1 ? "" : "s"} not granted to any department</strong>
+              <p>Students will not see these until you grant them under <button type="button" className="text-button inline-link" onClick={() => onNavigateToAdminView("departments")}>Course access</button> or when creating a course.</p>
+            </section>
+          )}
+
+          {isCollegeAdmin && myCollegeStats && (
+            <section className="college-scope-banner">
+              <div>
+                <span className="eyebrow accent">Your institution</span>
+                <h2>{myCollegeStats.name} ({myCollegeStats.code})</h2>
+                <p>
+                  Allowed emails: <strong>{formatDomainList(myCollegeStats.domains)}</strong>
+                  {" · "}
+                  <strong>{myCollegeStats.teachers}</strong> teachers
+                  {" · "}
+                  <strong>{myCollegeStats.students}</strong> students
+                  {" · "}
+                  <strong>{myCollegeStats.departments}</strong> departments
+                </p>
+              </div>
+            </section>
+          )}
+
+          {isAdmin && collegeStatsSummary.length > 0 && (
+            <section className="college-stats-section">
+              <div className="section-heading">
+                <div>
+                  <span className="eyebrow">By college</span>
+                  <h2>Teachers &amp; students per institution</h2>
+                </div>
+              </div>
+              <div className="college-stats-table-wrap">
+                <table className="college-stats-table" aria-describedby="college-stats-caption">
+                  <caption id="college-stats-caption" className="sr-only">Teachers and students count per college with email domains</caption>
+                  <thead>
+                    <tr>
+                      <th>College</th>
+                      <th>Domains</th>
+                      <th>Teachers</th>
+                      <th>Students</th>
+                      <th>Depts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {collegeStatsSummary.map((row) => (
+                      <tr key={row.collegeId}>
+                        <td><strong>{row.code}</strong> {row.name}</td>
+                        <td>{formatDomainList(row.domains)}</td>
+                        <td>{row.teachers}</td>
+                        <td>{row.students}</td>
+                        <td>{row.departments}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           <section className="admin-kpis">
             <article><span><Users size={19} /></span><div><strong>{students.length}</strong><small>Total students</small></div><em>Directory</em></article>
             <article><span><GraduationCap size={19} /></span><div><strong>{teachers.length}</strong><small>Faculty accounts</small></div><em>Active team</em></article>
@@ -448,17 +676,35 @@ export default function AdminPage({
           )}
 
           <section className="department-summary-section">
-            <div className="section-heading">
+            <div className="section-heading department-summary-heading">
               <div>
                 <span className="eyebrow">Department-wise students & faculty</span>
-                <h2>{isCollegeAdmin ? "Your college departments" : "All departments"}</h2>
+                <h2>{isCollegeAdmin ? "Your college departments" : "Departments by college"}</h2>
               </div>
+              {isAdmin && colleges.length > 0 && (
+                <label className="dept-summary-college-filter">
+                  Filter by college
+                  <select
+                    value={deptSummaryCollegeFilter}
+                    onChange={(e) => setDeptSummaryCollegeFilter(e.target.value)}
+                  >
+                    <option value="">All colleges</option>
+                    {colleges.map((c) => (
+                      <option key={c._id} value={c._id}>{c.code} — {c.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
             <div className="department-summary-grid">
               {colleges
-                .filter((c) => isCollegeAdmin ? String(c._id) === String(user?.collegeId) : true)
+                .filter((c) => {
+                  if (isCollegeAdmin) return String(c._id) === String(user?.collegeId);
+                  if (deptSummaryCollegeFilter) return String(c._id) === deptSummaryCollegeFilter;
+                  return true;
+                })
                 .flatMap((college) =>
-                  college.departments.map((d) => {
+                  college.departments.length ? college.departments.map((d) => {
                     const deptTeachers = users.filter((u) => u.role === "teacher" && String(u.departmentId) === String(d._id));
                     const deptStudents = users.filter((u) => u.role === "student" && String(u.departmentId) === String(d._id));
                     return (
@@ -467,18 +713,26 @@ export default function AdminPage({
                           <div>
                             <span className="pill">{d.code}</span>
                             <strong>{d.name}</strong>
-                            <small>{college.code}</small>
+                            {isAdmin && !deptSummaryCollegeFilter && <small>{college.code} · {college.name}</small>}
+                            {isAdmin && deptSummaryCollegeFilter && <small>{college.name}</small>}
                           </div>
                         </div>
                         <div className="department-summary-stats">
                           <span><strong>{deptStudents.length}</strong> students</span>
                           <span><strong>{deptTeachers.length}</strong> teachers</span>
-                          <span><strong>{d.allowedCourseIds.length}</strong> courses</span>
+                          <span><strong>{d.allowedCourseIds.length}</strong> courses granted</span>
                         </div>
                       </article>
                     );
-                  })
+                  }) : []
                 )}
+              {!colleges.some((c) => {
+                if (isCollegeAdmin) return String(c._id) === String(user?.collegeId) && c.departments.length;
+                if (deptSummaryCollegeFilter) return String(c._id) === deptSummaryCollegeFilter && c.departments.length;
+                return c.departments.length;
+              }) && (
+                <div className="empty-state department-summary-empty">No departments to show. {isAdmin ? "Pick another college or add departments under Course access." : "Add a department under Course access."}</div>
+              )}
             </div>
           </section>
 
@@ -486,8 +740,8 @@ export default function AdminPage({
             <div className="section-heading"><div><span className="eyebrow">Get going</span><h2>Quick actions</h2></div></div>
             <div className="overview-quick-grid">
               {isAdmin && <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("colleges")}><Building2 size={18} /><span><strong>Colleges</strong><small>Add or review institutions</small></span></button>}
-              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("departments")}><Layers size={18} /><span><strong>Departments & access</strong><small>Grant courses by department</small></span></button>
-              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("content")}><Library size={18} /><span><strong>Content library</strong><small>Courses, videos & documents</small></span></button>
+              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("departments")}><Layers size={18} /><span><strong>Grant to departments</strong><small>Who can see which course</small></span></button>
+              <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("content")}><Library size={18} /><span><strong>Courses &amp; files</strong><small>Create courses and upload content</small></span></button>
               <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("people")}><Users size={18} /><span><strong>People</strong><small>Create or import accounts</small></span></button>
               <button type="button" className="quick-card" onClick={() => onNavigateToAdminView("geography")}><MapPinned size={18} /><span><strong>Student geography</strong><small>See learners across India</small></span></button>
             </div>
@@ -499,12 +753,10 @@ export default function AdminPage({
         <section className="college-access-section">
           <div className="college-access-head">
             <div><span className="eyebrow">Institutions</span><h2>Colleges</h2><p>Create each college once, then open a card to preview its departments, people, and granted courses.</p></div>
-            <button className="primary-button" type="button" onClick={() => setShowCollegeForm(true)}>＋ Add college</button>
+            <button className="primary-button" type="button" onClick={() => { setCollegeWizardStep(1); setShowCollegeForm(true); }}>＋ Add college</button>
           </div>
           <div className="college-cards">
             {filteredColleges.map((college) => {
-              const cTeachers = users.filter((u) => u.role === "teacher" && String(u.collegeId) === String(college._id)).length;
-              const cStudents = users.filter((u) => u.role === "student" && String(u.collegeId) === String(college._id)).length;
               return (
                 <div
                   key={college._id}
@@ -514,13 +766,17 @@ export default function AdminPage({
                 >
                   <div className="college-card-head"><span className="pill">{college.code}</span><em className={college.active ? "is-active" : "is-paused"}>{college.active ? "Active" : "Paused"}</em></div>
                   <strong>{college.name}</strong>
-                  <small>{college.state || "—"} · {college.domains?.length ? college.domains.join(", ") : "no domains"}</small>
-                  <div className="college-card-stats"><em>{college.departments.length} depts</em><em>{cTeachers} teachers</em><em>{cStudents} students</em></div>
+                  <small>{college.state || "—"} · {formatDomainList(college.domains)}</small>
+                  <div className="college-card-stats">
+                    <em>{college.departments.length} depts</em>
+                    <em>{statsByCollegeId.get(college._id)?.teachers ?? users.filter((u) => u.role === "teacher" && String(u.collegeId) === String(college._id)).length} teachers</em>
+                    <em>{statsByCollegeId.get(college._id)?.students ?? users.filter((u) => u.role === "student" && String(u.collegeId) === String(college._id)).length} students</em>
+                  </div>
                   <span className="college-card-cta">View structure →</span>
                   {isStaff && (
                     <div className="college-card-actions">
                       {isAdmin && (
-                        <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); setEditCollege(college); setEditForm({ name: college.name, code: college.code, state: college.state || "", domains: (college.domains ?? []).join(", "), active: college.active }); setSelectedCollegeId(college._id); }}>Edit</button>
+                        <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); const live = colleges.find((c) => c._id === college._id) ?? college; setEditCollege(live); setSelectedCollegeId(college._id); }}>Edit</button>
                       )}
                       {isAdmin && (
                         <button className="danger-link" type="button" onClick={(e) => { e.stopPropagation(); setDeleteCollegeId(college._id); }}>Delete</button>
@@ -543,45 +799,72 @@ export default function AdminPage({
       )}
 
       {editCollege && (
-        <SidePanel title="Edit College" subtitle="Institution details" onClose={() => { setEditCollege(null); setEditForm(null); }} closeOnBackdrop={false}>
-          {editForm && (
-            <form className="create-college-card" onSubmit={(e) => {
+        <SidePanel title="Edit College" subtitle="Institution details" onClose={() => setEditCollege(null)} closeOnBackdrop={false}>
+          <form
+            key={editCollege._id}
+            className="create-college-card"
+            onSubmit={async (e) => {
               e.preventDefault();
-              api.updateCollege(editCollege._id, {
-                name: editForm.name,
-                code: editForm.code,
-                state: editForm.state,
-                domains: editForm.domains,
-                active: editForm.active,
-              })
-                .then(({ college }) => {
-                  setColleges((cur) => cur.map((c) => (c._id === college._id ? college : c)));
-                  setEditCollege(null);
-                  setEditForm(null);
-                  success("College updated", `“${college.name}” has been revised.`);
-                })
-                .catch((err) => {
-                  const msg = err instanceof Error ? err.message : "Update failed.";
-                  error("Update failed", msg);
+              const formEl = e.currentTarget;
+              if (!formEl.reportValidity()) {
+                error("Save failed", "Fill in college name, code, and state before saving.");
+                return;
+              }
+              const form = new FormData(formEl);
+              setCollegeSaving(true);
+              try {
+                const { college } = await api.updateCollege(editCollege._id, {
+                  name: String(form.get("name") ?? "").trim(),
+                  code: String(form.get("code") ?? "").trim(),
+                  state: String(form.get("state") ?? "").trim(),
+                  domains: parseDomainsInput(String(form.get("domains") ?? "")),
+                  active: form.get("active") === "on",
                 });
-            }}>
-              <h3>College details</h3>
-              <label>College name<input name="name" defaultValue={editForm.name} required placeholder="e.g. ABC Engineering College" /></label>
-              <div className="form-row">
-                <label>College code<input name="code" defaultValue={editForm.code} required maxLength={20} placeholder="ABCEC" /></label>
-                <label>State<select name="state" required defaultValue={editForm.state || ""}><option value="" disabled>Select state</option>{INDIA_STATES.map((state) => <option key={state}>{state}</option>)}</select></label>
-              </div>
-              <label>Email domains<input name="domains" defaultValue={editForm.domains} placeholder="abc.edu, drnpg.com (comma separated)" /><small className="field-hint">Accounts with these email domains are routed to this college.</small></label>
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input name="active" type="checkbox" defaultChecked={editForm.active} />
-                <span>Active</span>
+                const { colleges: freshColleges } = await api.listColleges();
+                setColleges(freshColleges);
+                setEditCollege(null);
+                success("College updated", `“${college.name}” has been saved to the database.`);
+                api.listCollegesStatsSummary().then(({ colleges: rows }) => setCollegeStatsSummary(rows)).catch(() => {});
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : "Update failed.";
+                error("Save failed", msg);
+              } finally {
+                setCollegeSaving(false);
+              }
+            }}
+          >
+            <h3>College details</h3>
+            <label>College name<input name="name" defaultValue={editCollege.name} required placeholder="e.g. ABC Engineering College" /></label>
+            <div className="form-row">
+              <label>College code<input name="code" defaultValue={editCollege.code} required maxLength={20} placeholder="ABCEC" /></label>
+              <label>State
+                <select
+                  name="state"
+                  required
+                  defaultValue={
+                    editCollege.state && INDIA_STATES.includes(editCollege.state)
+                      ? editCollege.state
+                      : INDIA_STATES[0]
+                  }
+                >
+                  {INDIA_STATES.map((state) => (
+                    <option key={state} value={state}>{state}</option>
+                  ))}
+                </select>
               </label>
-              <div className="panel-form-actions">
-                <button className="outline-small" type="button" onClick={() => { setEditCollege(null); setEditForm(null); }}>Cancel</button>
-                <button className="primary-button" type="submit">Save</button>
-              </div>
-            </form>
-          )}
+            </div>
+            <label>Email domains<input name="domains" required defaultValue={(editCollege.domains ?? []).join(", ")} placeholder="@abc.com" /><small className="field-hint">Each domain must be unique across the platform. Teachers, students, and college admins use these domains only.</small></label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input name="active" type="checkbox" defaultChecked={editCollege.active} />
+              <span>Active</span>
+            </label>
+            <div className="panel-form-actions">
+              <button className="outline-small" type="button" onClick={() => setEditCollege(null)}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={collegeSaving}>
+                {collegeSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </form>
         </SidePanel>
       )}
 
@@ -621,7 +904,7 @@ export default function AdminPage({
       {adminView === "departments" && isStaff && (
         <section className="college-access-section">
           <div className="college-access-head">
-            <div><span className="eyebrow">Institution access control</span><h2>Departments &amp; course access</h2><p>{isAdmin ? "Pick a college, open a department, and choose exactly which courses its students can discover, stream, and study." : "Add your departments, then choose which courses each department's students can access."}</p></div>
+            <div><span className="eyebrow">Grant to departments</span><h2>Who can see which course</h2><p>{isAdmin ? "Pick a college and department, then tick courses to grant. Only granted departments' teachers and students will see them." : "Add departments, then grant courses per department (e.g. ECE only, not CSE)."}</p></div>
             <span className="access-security-badge">Backend enforced</span>
           </div>
 
@@ -643,8 +926,8 @@ export default function AdminPage({
                   <div><span className="pill">{selectedCollege.code}</span><h3>{selectedCollege.name}</h3><p>{directoryUsers.filter((u) => u.collegeId === selectedCollege._id && u.role === "student").length} assigned students</p></div>
                 </div>
                 <form className="college-domains-form" onSubmit={saveCollegeDomains}>
-                  <div><strong>Email domains</strong><small>Route &amp; validate this college's accounts by email domain.</small></div>
-                  <input value={domainsDraft} onChange={(e) => setDomainsDraft(e.target.value)} placeholder="abc.edu, drnpg.com" />
+                  <div><strong>Email domains</strong><small>Only addresses on these domains can sign in or be created for this college.</small></div>
+                  <input value={domainsDraft} onChange={(e) => setDomainsDraft(e.target.value)} placeholder="@abc.com" />
                   <button type="submit">Save domains</button>
                   
                 </form>
@@ -673,7 +956,11 @@ export default function AdminPage({
                           <em>{d.allowedCourseIds.length} courses</em>
                         </div>
                         <div className="department-actions">
-                          <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); setEditDepartmentId({ collegeId: selectedCollege._id, departmentId: d._id, name: d.name, code: d.code }); }}>Edit</button>
+                          <button className="text-button" type="button" onClick={(e) => {
+                            e.stopPropagation();
+                            const live = selectedCollege.departments.find((dept) => dept._id === d._id) ?? d;
+                            setEditDepartmentId({ collegeId: selectedCollege._id, departmentId: live._id, name: live.name, code: live.code });
+                          }}>Edit</button>
                           <button className="danger-link" type="button" onClick={(e) => { e.stopPropagation(); setDeleteDepartmentId({ collegeId: selectedCollege._id, departmentId: d._id }); }}>Delete</button>
                         </div>
                       </div>
@@ -746,7 +1033,10 @@ export default function AdminPage({
 
       {editDepartmentId && (
         <SidePanel title="Edit Department" subtitle="Department details" onClose={() => setEditDepartmentId(null)} closeOnBackdrop={false}>
-          <form className="department-create-row" onSubmit={(e) => {
+          <form
+            key={editDepartmentId.departmentId}
+            className="department-create-row"
+            onSubmit={(e) => {
             e.preventDefault();
             const formData = new FormData(e.currentTarget);
             const name = String(formData.get("departmentName") ?? "").trim();
@@ -809,48 +1099,75 @@ export default function AdminPage({
       {adminView === "content" && isStaff && (
         <>
           <div className="college-access-head">
-            <div><span className="eyebrow">Content library</span><h2>{isAdmin ? "All platform courses & files" : "Your college's courses & files"}</h2><p>{isAdmin ? "Create courses, upload recordings and documents, and edit or remove any resource." : "Upload recordings and documents to your college's courses, and edit or remove the files you own."}</p></div>
+            <div><span className="eyebrow">Content library</span><h2>{isAdmin ? "All platform courses & files" : "Your college's courses & files"}</h2><p>{isAdmin ? "Create platform courses, assign them to college departments, and manage the full catalog." : "Create courses for your college, assign them to departments (ECE, CSE, …), and manage your college catalog."}</p></div>
           </div>
 
-          {isAdmin && (
+          {(isAdmin || isCollegeAdmin) && (
             <>
-          <section className="admin-tools-grid">
-            <form className="admin-tool-card" onSubmit={createCourse}>
-              <div className="tool-card-head"><span>01</span><div><span className="eyebrow">Course management</span><h2>Create a new course</h2></div></div>
-              <CourseFields />
-              <div className="course-push">
-                <div className="course-push-head">
-                  <strong>Push to colleges &amp; departments</strong>
-                  <small>Optional — grant this new course to specific departments right away.</small>
+          <section className="course-create-section" aria-labelledby="course-create-heading">
+            <div className="course-create-header">
+              <div className="course-create-header-icon" aria-hidden>
+                <BookOpen size={22} strokeWidth={1.8} />
+              </div>
+              <div>
+                <span className="eyebrow accent">Course management</span>
+                <h2 id="course-create-heading">Create a new course</h2>
+                <p>
+                  {isAdmin
+                    ? "Only departments you select below will see this course. Other colleges and departments stay hidden until you assign access."
+                    : "Teachers and students only see courses granted to their department. Select which departments get this course now, or assign later under Departments & Access."}
+                </p>
+              </div>
+            </div>
+
+            <form className="course-create-form" onSubmit={createCourse}>
+              <div className="course-create-grid">
+                <div className="course-create-panel">
+                  <h3>Course details</h3>
+                  <CourseFields />
                 </div>
-                {colleges.length ? colleges.map((college) => {
-                  const depts = college.departments;
-                  const allOn = depts.length > 0 && depts.every((d) => pushTargets[d._id]);
-                  return (
-                    <div className="course-push-college" key={college._id}>
-                      <label className="push-college">
-                        <input
-                          type="checkbox"
-                          checked={allOn}
-                          onChange={() => setPushTargets((prev) => {
-                            const next = { ...prev };
-                            depts.forEach((d) => { if (allOn) delete next[d._id]; else next[d._id] = true; });
-                            return next;
-                          })}
-                        />
-                        <span><strong>{college.code}</strong> {college.name}</span>
-                      </label>
-                      <div className="push-depts">
-                        {depts.length ? depts.map((d) => (
-                          <label key={d._id} className={pushTargets[d._id] ? "on" : ""}>
-                            <input type="checkbox" checked={!!pushTargets[d._id]} onChange={() => setPushTargets((prev) => ({ ...prev, [d._id]: !prev[d._id] }))} />
-                            {d.code}
-                          </label>
-                        )) : <small className="empty-inline">No departments yet.</small>}
-                      </div>
+
+                <div className="course-create-panel course-create-panel-access">
+                  <h3>Grant to departments</h3>
+                  <div className="course-push">
+                    <div className="course-push-head">
+                      <strong>{isAdmin ? "Grant to college departments" : "Grant to your departments"}</strong>
+                      <small>Example: tick ECE only — ECE teachers can build content and ECE students can enroll; CSE will not see it.</small>
                     </div>
-                  );
-                }) : <small className="empty-inline">Create a college and its first department to push courses.</small>}
+                    <div className="course-push-scroll">
+                      {pushColleges.length ? pushColleges.map((college) => {
+                        const depts = college.departments;
+                        const allOn = depts.length > 0 && depts.every((d) => pushTargets[d._id]);
+                        return (
+                          <div className="course-push-college" key={college._id}>
+                            <label className="push-college">
+                              <input
+                                type="checkbox"
+                                checked={allOn}
+                                onChange={() => setPushTargets((prev) => {
+                                  const next = { ...prev };
+                                  depts.forEach((d) => { if (allOn) delete next[d._id]; else next[d._id] = true; });
+                                  return next;
+                                })}
+                              />
+                              <span><strong>{college.code}</strong> {college.name}</span>
+                            </label>
+                            <div className="push-depts">
+                              {depts.length ? depts.map((d) => (
+                                <label key={d._id} className={pushTargets[d._id] ? "on" : ""}>
+                                  <input type="checkbox" checked={!!pushTargets[d._id]} onChange={() => setPushTargets((prev) => ({ ...prev, [d._id]: !prev[d._id] }))} />
+                                  {d.code}
+                                </label>
+                              )) : <small className="empty-inline">No departments yet.</small>}
+                            </div>
+                          </div>
+                        );
+                      }) : (
+                        <p className="course-push-empty">Create a college and its first department to push courses from here.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </form>
           </section>
@@ -858,20 +1175,21 @@ export default function AdminPage({
           <section className="management-section">
             <div className="section-heading"><div><span className="eyebrow">Course controls</span><h2>Edit or delete courses</h2></div></div>
             <div className="management-list">
-              {courses.map((course) =>
+              {contentCourses.map((course) =>
                 curriculumCourseId === course.slug ? (
                   <CurriculumBuilder
-                    key={course.slug}
+                    key={curriculumReloadKey || `${course.slug}-draft`}
                     course={course}
                     onSaved={(updated) => {
                       setCourses((items) => items.map((c) => (c.slug === updated.slug || c._id === updated._id ? updated : c)));
+                      setCurriculumReloadKey(`${updated.slug}-${updated.updatedAt ?? Date.now()}`);
                       setCurriculumCourseId(null);
                     }}
                     onAssetUploaded={(asset) => setAssets((cur) => [asset, ...cur])}
                     onClose={() => setCurriculumCourseId(null)}
                   />
                 ) : editingCourseId === course.slug ? (
-                  <form className="management-edit" key={course.slug} onSubmit={updateCourse}>
+                  <form className="management-edit" key={`edit-${course.slug}-${course.updatedAt ?? ""}`} onSubmit={updateCourse}>
                     <input type="hidden" name="id" value={course.slug} />
                     <CourseFields initial={course} submitLabel="Save" onCancel={() => setEditingCourseId(null)} />
                   </form>
@@ -880,7 +1198,7 @@ export default function AdminPage({
                     <span className="mini-icon" style={{ background: course.color }}>{course.icon}</span>
                     <span><strong>{course.title}</strong><small>{course.category} · {course.level} · by {courseAuthorLabel(course)}</small></span>
                     <div className="management-actions">
-                      <button className="text-button" onClick={() => { setCurriculumCourseId(course.slug); setEditingCourseId(null); }}>Curriculum</button>
+                      <button className="text-button" onClick={() => loadCurriculumEditor(course.slug)}>Curriculum</button>
                       <button className="text-button" onClick={() => { setEditingCourseId(course.slug); setCurriculumCourseId(null); }}>Edit</button>
                       <button className="danger-button" onClick={() => deleteCourse(course._id ?? course.slug)}>Delete</button>
                     </div>
@@ -920,15 +1238,38 @@ export default function AdminPage({
 
       {adminView === "people" && isStaff && (
         <>
+          {isAdmin && (
+            <div className="people-college-filter">
+              <label>
+                Filter by college
+                <select value={peopleCollegeFilter} onChange={(e) => setPeopleCollegeFilter(e.target.value)}>
+                  <option value="">All colleges</option>
+                  {colleges.map((c) => (
+                    <option key={c._id} value={c._id}>{c.code} — {c.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
           <section className="admin-tools-grid">
             <form className="admin-tool-card" onSubmit={createUser}>
               <div className="tool-card-head"><span>01</span><div><span className="eyebrow">Access management</span><h2>Create a user login</h2></div></div>
+              <p className="field-hint domain-hint">
+                {isCollegeAdmin
+                  ? `Use only ${formatDomainList(colleges.find((c) => c._id === user?.collegeId)?.domains)} for teachers and students.`
+                  : (() => {
+                      const picked = colleges.find((c) => c._id === userCollegeId);
+                      return picked?.domains?.length
+                        ? `Allowed for ${picked.code}: ${formatDomainList(picked.domains)}`
+                        : "Pick a college — the email must match that college's domain (e.g. teacher@abc.com).";
+                    })()}
+              </p>
               <div className="form-row"><label>Full name<input name="name" required placeholder="Teacher or student name" /></label><label>Account role<select name="role" defaultValue="student"><option value="student">Student</option><option value="teacher">Teacher</option>{isAdmin && <option value="collegeAdmin">College admin</option>}{isAdmin && <option value="admin">Administrator</option>}</select></label></div>
               <div className="form-row">
                 <label>College<select name="collegeId" value={isCollegeAdmin ? user?.collegeId || "" : userCollegeId} onChange={(e) => setUserCollegeId(e.target.value)} disabled={isCollegeAdmin}>{isAdmin && <option value="">No college / platform account</option>}{colleges.filter((c) => c.active).map((c) => <option value={c._id} key={c._id}>{c.code} — {c.name}</option>)}</select></label>
                 <label>Department<select name="departmentId"><option value="">Select department</option>{colleges.find((c) => c._id === (isCollegeAdmin ? user?.collegeId || "" : userCollegeId))?.departments.filter((d) => d.active).map((d) => <option value={d._id} key={d._id}>{d.code} — {d.name}</option>)}</select></label>
               </div>
-              <label>Email<input name="email" type="email" required placeholder="user@example.com" /></label>
+              <label>Email<input name="email" type="email" required placeholder="name@yourcollege.com" /></label>
               <label>Temporary password<input name="password" type="password" minLength={10} required placeholder="Minimum 10 characters" /></label>
               <button className="primary-button" type="submit">Create login <span>→</span></button>
             </form>
@@ -943,6 +1284,10 @@ export default function AdminPage({
               <label className="file-drop compact"><input type="file" accept=".xlsx,.xls,.csv" onChange={previewBulkUsers} /><span>Choose Excel or CSV file</span><small>.xlsx, .xls, or .csv · the Users worksheet will be imported</small></label>
               <label className="bulk-default-password">Default password (optional)<input type="text" value={defaultPassword} onChange={(e) => setDefaultPassword(e.target.value)} placeholder="Used for rows without a password" /><small>Re-importing an existing email overwrites that account.</small></label>
               
+            </div>
+            <div className="bulk-import-legend">
+              <strong>Template columns</strong>
+              <p>Full Name · Email (must match college @domain) · Role · Password · Student ID · Department code or name · College code</p>
             </div>
             {bulkRows.length > 0 && (
               <>
@@ -963,7 +1308,9 @@ export default function AdminPage({
           <section className="management-section">
             <div className="section-heading"><div><span className="eyebrow">User controls</span><h2>Manage created users</h2></div></div>
             <div className="management-list">
-              {directoryUsers.length ? directoryUsers.map((authUser) => (
+              {usersLoading ? (
+                <ListSkeleton rows={6} />
+              ) : directoryUsers.length ? directoryUsers.map((authUser) => (
                 <div className="management-item user-management-item" key={authUser._id}>
                   <span className="directory-avatar">{authUser.name.slice(0, 1)}</span>
                   <span><strong>{authUser.name}</strong><small>{authUser.email} · {authUser.role}{authUser.department ? ` · ${authUser.department}` : ""}</small></span>
@@ -1017,23 +1364,61 @@ export default function AdminPage({
       )}
 
       {showCollegeForm && (
-        <SidePanel title="Add a college" subtitle="New institution" onClose={() => setShowCollegeForm(false)} closeOnBackdrop={false}>
-          <form className="create-college-card" onSubmit={createCollege}>
-            <h3>College details</h3>
-            <label>College name<input name="name" required placeholder="e.g. ABC Engineering College" /></label>
-            <div className="form-row"><label>College code<input name="code" required maxLength={20} placeholder="ABCEC" /></label><label>State<select name="state" required defaultValue=""><option value="" disabled>Select state</option>{INDIA_STATES.map((state) => <option key={state}>{state}</option>)}</select></label></div>
-            <label>Email domains<input name="domains" placeholder="abc.edu, drnpg.com (comma separated)" /><small className="field-hint">Accounts with these email domains are routed to this college.</small></label>
-            <h3>College admin (gives them the ABC portal)</h3>
-            <label>Admin name<input name="adminName" required placeholder="e.g. Priya Sharma" /></label>
-            <div className="form-row"><label>Admin email<input name="adminEmail" type="email" required placeholder="admin@abc.edu" /></label><label>Temporary password<input name="adminPassword" type="password" minLength={10} required placeholder="Minimum 10 characters" /></label></div>
+        <SidePanel
+          title="Add a college"
+          subtitle={`Step ${collegeWizardStep} of 2`}
+          onClose={() => { setShowCollegeForm(false); setCollegeWizardStep(1); setCollegeWizardDraft({ name: "", code: "", state: "", domains: "" }); }}
+          closeOnBackdrop={false}
+        >
+          <div className="wizard-steps" aria-hidden>
+            <span className={collegeWizardStep === 1 ? "active" : collegeWizardStep > 1 ? "done" : ""}>1. College</span>
+            <span className={collegeWizardStep === 2 ? "active" : ""}>2. College admin</span>
+          </div>
+          <form className="create-college-card" onSubmit={submitCollegeWizard}>
+            {collegeWizardStep === 1 ? (
+              <>
+                <h3>College details</h3>
+                <label>College name<input name="name" required defaultValue={collegeWizardDraft.name} placeholder="e.g. ABC Engineering College" /></label>
+                <div className="form-row">
+                  <label>College code<input name="code" required maxLength={20} defaultValue={collegeWizardDraft.code} placeholder="ABCEC" /></label>
+                  <label>State<select name="state" required defaultValue={collegeWizardDraft.state || ""}><option value="" disabled>Select state</option>{INDIA_STATES.map((state) => <option key={state}>{state}</option>)}</select></label>
+                </div>
+                <label>Email domains<input name="domains" required defaultValue={collegeWizardDraft.domains} placeholder="@abc.com, @krishna.com" /><small className="field-hint">Unique per college. The college admin email in step 2 must match one of these domains.</small></label>
+              </>
+            ) : (
+              <>
+                <h3>College administrator</h3>
+                <p className="field-hint">Creates the portal login for <strong>{collegeWizardDraft.name || "this college"}</strong>.</p>
+                <label>Admin name<input name="adminName" required placeholder="e.g. Priya Sharma" /></label>
+                <div className="form-row">
+                  <label>Admin email<input name="adminEmail" type="email" required placeholder="admin@abc.com" /></label>
+                  <label>Temporary password<input name="adminPassword" type="password" minLength={10} required placeholder="Minimum 10 characters" /></label>
+                </div>
+              </>
+            )}
             <div className="panel-form-actions">
-              <button className="outline-small" type="button" onClick={() => setShowCollegeForm(false)}>Cancel</button>
-              <button className="primary-button" type="submit">Create college <span>→</span></button>
+              <button className="outline-small" type="button" onClick={() => { setShowCollegeForm(false); setCollegeWizardStep(1); }}>Cancel</button>
+              {collegeWizardStep === 2 && (
+                <button className="outline-small" type="button" onClick={() => setCollegeWizardStep(1)}>Back</button>
+              )}
+              <button className="primary-button" type="submit">
+                {collegeWizardStep === 1 ? "Next: college admin" : "Create college"} <span>→</span>
+              </button>
             </div>
-            
           </form>
         </SidePanel>
       )}
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title ?? ""}
+        message={confirmDialog?.message ?? ""}
+        danger={confirmDialog?.danger}
+        confirmLabel={confirmDialog?.confirmLabel}
+        busy={confirmBusy}
+        onCancel={() => { if (!confirmBusy) setConfirmDialog(null); }}
+        onConfirm={() => { void confirmDialog?.onConfirm(); }}
+      />
 
       {structureCollege && (() => {
         const cTeachers = users.filter((u) => u.role === "teacher" && String(u.collegeId) === String(structureCollege._id));
@@ -1043,7 +1428,7 @@ export default function AdminPage({
             subtitle="College structure"
             title={<><span className="pill">{structureCollege.code}</span> {structureCollege.name}</>}
             onClose={() => setStructureCollegeId(null)}
-            footer={<button className="primary-button" type="button" onClick={() => { setSelectedCollegeId(structureCollege._id); setSelectedDepartmentId(""); setStructureCollegeId(null); onNavigateToAdminView("departments"); }}>Manage course access <span>→</span></button>}
+            footer={<button className="primary-button" type="button" onClick={() => { setSelectedCollegeId(structureCollege._id); setSelectedDepartmentId(""); setStructureCollegeId(null); onNavigateToAdminView("departments"); }}>Grant courses to departments <span>→</span></button>}
           >
             <div className="college-structure-meta">
               <span><strong>{structureCollege.departments.length}</strong> departments</span>
@@ -1051,7 +1436,7 @@ export default function AdminPage({
               <span><strong>{cStudents.length}</strong> students</span>
               <span>{structureCollege.state || "—"}</span>
             </div>
-            <p className="structure-domains">Domains: {structureCollege.domains?.length ? structureCollege.domains.join(", ") : "none set"}</p>
+            <p className="structure-domains">Allowed emails: {formatDomainList(structureCollege.domains)}</p>
             {structureCollege.departments.length ? structureCollege.departments.map((d) => {
               const deptTeachers = users.filter((u) => u.role === "teacher" && String(u.departmentId) === String(d._id));
               const deptStudents = users.filter((u) => u.role === "student" && String(u.departmentId) === String(d._id));

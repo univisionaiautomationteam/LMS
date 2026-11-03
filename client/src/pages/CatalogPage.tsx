@@ -7,10 +7,12 @@ export default function CatalogPage({
   search,
   availableCourses,
   openCourse,
+  collegeName,
 }: {
   search: string;
   availableCourses: Course[];
   openCourse: (id: string) => void;
+  collegeName?: string;
 }) {
   const [levelFilter, setLevelFilter] = useState<"All" | "Beginner" | "Intermediate" | "Advanced">("All");
 
@@ -57,7 +59,11 @@ export default function CatalogPage({
         {!filtered.length && (
           <div className="course-access-empty">
             <BookOpen size={28} /><h2>No courses assigned yet</h2>
-            <p>Your college administrator has not assigned courses to this account. Contact your college or platform administrator for access.</p>
+            <p>
+              {collegeName
+                ? `${collegeName} has not granted courses to your department. Contact your college admin — they grant access under Who can see which course.`
+                : "Your college administrator has not assigned courses to this account. Contact your college or platform administrator for access."}
+            </p>
           </div>
         )}
       </div>

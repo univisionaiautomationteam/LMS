@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { Asset, Course } from "../types";
 import { formatBytes } from "../data/constants";
 import { usePopup } from "../context/PopupContext";
+import ConfirmDialog from "./ConfirmDialog";
 
 export default function AssetTable({
   assets,
@@ -22,20 +23,20 @@ export default function AssetTable({
   emptyBody?: string;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Asset | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const { success, error } = usePopup();
 
   async function open(asset: Asset) {
     try {
       const url = asset.objectKey ? (await api.assetUrl(asset._id)).url : asset.url;
       if (!url) {
-        setStatus("This item has no stored file.");
+        error("Open failed", "This item has no stored file.");
         return;
       }
       window.open(url, "_blank", "noopener");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not open that file.";
-      setStatus(msg);
       error("Open failed", msg);
     }
   }
@@ -49,27 +50,31 @@ export default function AssetTable({
         course: form.get("course"),
       });
       setEditingId(null);
-      setStatus(`Updated “${asset.title}”.`);
       success("Asset updated", `“${asset.title}” has been saved.`);
       onUpdated?.(asset);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Update failed.";
-      setStatus(msg);
       error("Update failed", msg);
     }
   }
 
   async function remove(asset: Asset) {
-    if (!window.confirm(`Permanently delete “${asset.title}”?`)) return;
+    setDeleteTarget(asset);
+  }
+
+  async function confirmRemove() {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
     try {
-      await api.deleteAsset(asset._id);
-      setStatus("Content deleted.");
-      success("Asset deleted", `“${asset.title}” has been removed.`);
-      onDeleted?.(asset);
+      await api.deleteAsset(deleteTarget._id);
+      success("Asset deleted", `“${deleteTarget.title}” has been removed.`);
+      onDeleted?.(deleteTarget);
+      setDeleteTarget(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Delete failed.";
-      setStatus(msg);
       error("Delete failed", msg);
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -84,6 +89,7 @@ export default function AssetTable({
   }
 
   return (
+    <>
     <div className="asset-table">
       <div className="asset-row asset-header">
         <span>Content</span>
@@ -136,7 +142,17 @@ export default function AssetTable({
           </div>
         );
       })}
-      {status && <p className="form-status" role="status">{status}</p>}
     </div>
+    <ConfirmDialog
+      open={Boolean(deleteTarget)}
+      title="Delete this file?"
+      message={deleteTarget ? `“${deleteTarget.title}” will be removed permanently from the course library.` : ""}
+      danger
+      confirmLabel="Delete file"
+      busy={deleteBusy}
+      onCancel={() => { if (!deleteBusy) setDeleteTarget(null); }}
+      onConfirm={() => { void confirmRemove(); }}
+    />
+    </>
   );
 }

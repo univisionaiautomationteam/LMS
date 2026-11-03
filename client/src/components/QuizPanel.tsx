@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { QuizQuestion, QuizResult } from "../types";
+import { usePopup } from "../context/PopupContext";
 
 /**
  * Inline course quiz. Questions are fetched without their answers; grading
@@ -23,7 +24,7 @@ export default function QuizPanel({
   const [answers, setAnswers] = useState<number[]>([]);
   const [result, setResult] = useState<QuizResult | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "submitting" | "error">("loading");
-  const [message, setMessage] = useState("");
+  const { success, error: showError } = usePopup();
 
   useEffect(() => {
     let cancelled = false;
@@ -40,7 +41,10 @@ export default function QuizPanel({
         setStatus("ready");
       })
       .catch(() => {
-        if (!cancelled) setStatus("error");
+        if (!cancelled) {
+          setStatus("error");
+          showError("Load failed", "This quiz could not be loaded.");
+        }
       });
     return () => {
       cancelled = true;
@@ -51,22 +55,23 @@ export default function QuizPanel({
 
   async function submit() {
     setStatus("submitting");
-    setMessage("");
     try {
       const graded = await api.submitQuiz(courseSlug, answers, lessonKey);
       setResult(graded);
       setStatus("ready");
-      if (graded.passed) onPassed();
+      if (graded.passed) {
+        success("Quiz passed", `You scored ${graded.score}/${graded.total} (${graded.percent}%). The lesson is marked complete.`);
+        onPassed();
+      }
     } catch (err) {
       setStatus("ready");
-      setMessage(err instanceof Error ? err.message : "Unable to submit your answers.");
+      showError("Submit failed", err instanceof Error ? err.message : "Unable to submit your answers.");
     }
   }
 
   function retry() {
     setResult(null);
     setAnswers(new Array(questions.length).fill(-1));
-    setMessage("");
   }
 
   if (status === "loading") return <div className="quiz-panel"><p className="empty-inline">Loading quiz…</p></div>;
@@ -129,8 +134,6 @@ export default function QuizPanel({
           </fieldset>
         );
       })}
-
-      {message && <p className="profile-status" role="status">{message}</p>}
 
       <div className="quiz-actions">
         {result ? (

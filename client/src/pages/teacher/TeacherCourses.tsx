@@ -5,6 +5,7 @@ import CourseFields, { readCourseForm } from "../../components/CourseFields";
 import CurriculumBuilder from "../../components/CurriculumBuilder";
 import type { Asset, Course, View } from "../../types";
 import { usePopup } from "../../context/PopupContext";
+import ConfirmDialog from "../../components/ConfirmDialog";
 
 export default function TeacherCourses({
   setCourses,
@@ -20,11 +21,12 @@ export default function TeacherCourses({
   goTo: (view: View) => void;
 }) {
   const [courses, setMyCourses] = useState<Course[] | null>(null);
-  const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [curriculumSlug, setCurriculumSlug] = useState<string | null>(null);
+  const [curriculumReloadKey, setCurriculumReloadKey] = useState("");
+  const [deleteCourseTarget, setDeleteCourseTarget] = useState<Course | null>(null);
   const { success, error } = usePopup();
 
   useEffect(() => {
@@ -36,7 +38,6 @@ export default function TeacherCourses({
       })
       .catch((err) => {
         if (!cancelled) {
-          setStatus(err instanceof Error ? err.message : "Unable to load your courses.");
           error("Load failed", err instanceof Error ? err.message : "Unable to load your courses.");
         }
       });
@@ -53,7 +54,7 @@ export default function TeacherCourses({
     e.preventDefault();
     const values = readCourseForm(new FormData(e.currentTarget));
     if (!values.title) {
-      setStatus("Course title is required.");
+      error("Create failed", "Course title is required.");
       return;
     }
     setBusy(true);
@@ -62,10 +63,8 @@ export default function TeacherCourses({
       setMyCourses((cur) => [course, ...(cur ?? [])]);
       setCourses((cur) => [course, ...cur]);
       setCreating(false);
-      setStatus(`Course “${course.title}” is live. Upload content from the Content studio.`);
-      success("Course created", `“${course.title}” has been published.`);
+      success("Course created", `“${course.title}” is live in your department. Upload lessons from Upload studio.`);
     } catch (err: any) {
-      setStatus(err instanceof Error ? err.message : "Course creation failed.");
       error("Create failed", err instanceof Error ? err.message : "Course creation failed.");
     } finally {
       setBusy(false);
@@ -82,10 +81,8 @@ export default function TeacherCourses({
       setMyCourses((cur) => (cur ?? []).map((item) => (item.slug === course.slug ? course : item)));
       setCourses((cur) => cur.map((item) => (item.slug === course.slug || item._id === course._id ? course : item)));
       setEditingSlug(null);
-      setStatus(`Course “${course.title}” was updated.`);
       success("Course updated", `“${course.title}” has been revised.`);
     } catch (err: any) {
-      setStatus(err instanceof Error ? err.message : "Course update failed.");
       error("Update failed", err instanceof Error ? err.message : "Course update failed.");
     } finally {
       setBusy(false);
@@ -93,16 +90,19 @@ export default function TeacherCourses({
   }
 
   async function handleDelete(course: Course) {
-    if (!window.confirm(`Delete “${course.title}” from the catalog?`)) return;
+    setDeleteCourseTarget(course);
+  }
+
+  async function confirmDeleteCourse() {
+    if (!deleteCourseTarget) return;
     setBusy(true);
     try {
-      await api.deleteCourse(course._id ?? course.slug);
-      setMyCourses((cur) => (cur ?? []).filter((item) => item.slug !== course.slug));
-      setCourses((cur) => cur.filter((item) => item.slug !== course.slug && item._id !== course._id));
-      setStatus(`Course “${course.title}” was deleted.`);
-      success("Course deleted", `“${course.title}” has been removed.`);
-    } catch (err: any) {
-      setStatus(err instanceof Error ? err.message : "Course deletion failed.");
+      await api.deleteCourse(deleteCourseTarget._id ?? deleteCourseTarget.slug);
+      setMyCourses((cur) => (cur ?? []).filter((item) => item.slug !== deleteCourseTarget.slug));
+      setCourses((cur) => cur.filter((item) => item.slug !== deleteCourseTarget.slug && item._id !== deleteCourseTarget._id));
+      success("Course deleted", `“${deleteCourseTarget.title}” has been removed.`);
+      setDeleteCourseTarget(null);
+    } catch (err: unknown) {
       error("Delete failed", err instanceof Error ? err.message : "Course deletion failed.");
     } finally {
       setBusy(false);
@@ -112,8 +112,27 @@ export default function TeacherCourses({
   function handleCurriculumSaved(course: Course) {
     setMyCourses((cur) => (cur ?? []).map((item) => (item.slug === course.slug ? course : item)));
     setCourses((cur) => cur.map((item) => (item.slug === course.slug || item._id === course._id ? course : item)));
-    setStatus(`Curriculum for “${course.title}” saved.`);
+    setCurriculumReloadKey(`${course.slug}-${course.updatedAt ?? Date.now()}`);
     success("Curriculum saved", `Curriculum for “${course.title}” has been updated.`);
+  }
+
+  async function loadCurriculumEditor(slug: string) {
+    const existing = (courses ?? []).find((c) => c.slug === slug);
+    if (!existing) {
+      error("Load failed", "Course not found.");
+      return;
+    }
+    try {
+      const { course: fresh } = await api.getCourse(existing._id ?? existing.slug);
+      setMyCourses((cur) => (cur ?? []).map((item) => (item.slug === fresh.slug ? fresh : item)));
+      setCourses((cur) => cur.map((item) => (item.slug === fresh.slug || item._id === fresh._id ? fresh : item)));
+      setEditingSlug(null);
+      setCreating(false);
+      setCurriculumSlug(fresh.slug);
+      setCurriculumReloadKey(`${fresh.slug}-${fresh.updatedAt ?? Date.now()}`);
+    } catch (err) {
+      error("Load failed", err instanceof Error ? err.message : "Could not load this course from the server.");
+    }
   }
 
   return (
@@ -158,14 +177,14 @@ export default function TeacherCourses({
           {courses?.map((course) =>
             curriculumSlug === course.slug ? (
               <CurriculumBuilder
-                key={course.slug}
+                key={curriculumReloadKey || `${course.slug}-draft`}
                 course={course}
                 onSaved={handleCurriculumSaved}
                 onAssetUploaded={(asset) => setAssets((cur) => [asset, ...cur])}
                 onClose={() => setCurriculumSlug(null)}
               />
             ) : editingSlug === course.slug ? (
-              <form className="management-edit" key={course.slug} onSubmit={handleUpdate}>
+              <form className="management-edit" key={`edit-${course.slug}-${course.updatedAt ?? ""}`} onSubmit={handleUpdate}>
                 <input type="hidden" name="id" value={course.slug} />
                 <CourseFields initial={course} submitLabel="Save" onCancel={() => setEditingSlug(null)} />
               </form>
@@ -180,7 +199,7 @@ export default function TeacherCourses({
                   </small>
                 </span>
                 <div className="management-actions">
-                  <button className="text-button" type="button" onClick={() => { setCurriculumSlug(course.slug); setEditingSlug(null); setCreating(false); }}>Curriculum</button>
+                  <button className="text-button" type="button" onClick={() => loadCurriculumEditor(course.slug)}>Curriculum</button>
                   <button className="text-button" type="button" onClick={() => openCourse(course.slug)}>Open</button>
                   <button className="text-button" type="button" onClick={() => { setEditingSlug(course.slug); setCurriculumSlug(null); setCreating(false); }}>Edit</button>
                   <button className="danger-button" type="button" onClick={() => handleDelete(course)}>Delete</button>
@@ -192,15 +211,23 @@ export default function TeacherCourses({
 
         <div className="management-links">
           <button className="outline-small" type="button" onClick={() => goTo("admin")}>
-            Upload content for these courses →
+            Open upload studio →
           </button>
           {/* <button className="outline-small" type="button" onClick={() => goTo("profile")}>
             Update your profile →
           </button> */}
         </div>
       </section>
-
-      {status && <p className="admin-status" role="status">{status}</p>}
+      <ConfirmDialog
+        open={Boolean(deleteCourseTarget)}
+        title="Delete this course?"
+        message={deleteCourseTarget ? `“${deleteCourseTarget.title}” will be removed from your catalog and unlinked from department grants.` : ""}
+        danger
+        confirmLabel="Delete course"
+        busy={busy}
+        onCancel={() => { if (!busy) setDeleteCourseTarget(null); }}
+        onConfirm={() => { void confirmDeleteCourse(); }}
+      />
     </div>
   );
 }

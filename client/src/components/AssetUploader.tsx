@@ -30,11 +30,11 @@ export default function AssetUploader({
     const form = new FormData(formElement);
     const file = selectedFile;
     if (!(file instanceof File) || !file.size) {
-      setStatus("Choose a file to upload.");
+      error("Upload failed", "Choose a file to upload.");
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
-      setStatus(`That file is too large. The limit is ${MAX_UPLOAD_LABEL}.`);
+      error("Upload failed", `That file is too large. The limit is ${MAX_UPLOAD_LABEL}.`);
       return;
     }
 
@@ -43,11 +43,11 @@ export default function AssetUploader({
     const kind = String(form.get("kind") ?? "video");
 
     if (!assetTitle) {
-      setStatus("Content title is required.");
+      error("Upload failed", "Content title is required.");
       return;
     }
     if (!course) {
-      setStatus("Please select a course.");
+      error("Upload failed", "Please select a course.");
       return;
     }
 
@@ -81,13 +81,11 @@ export default function AssetUploader({
       formElement.reset();
       setSelectedFile(null);
       setProgress(100);
-      setStatus("Published to the course library.");
       success("Upload complete", `“${assetTitle}” has been published.`);
     } catch (err: any) {
       setProgress(0);
-      const msg = err?.message ?? "Upload failed.";
-      setStatus(msg);
-      error("Upload failed", msg);
+      setStatus("");
+      error("Upload failed", err?.message ?? "Upload failed.");
     } finally {
       setBusy(false);
     }
@@ -168,7 +166,7 @@ export default function AssetUploader({
         {busy ? "Uploading…" : "Upload & publish"}
         {!busy && <span>→</span>}
       </button>
-      {status && <p className="form-status" role="status">{status}</p>}
+      {busy && status ? <p className="form-status" role="status">{status}</p> : null}
     </form>
   );
 }

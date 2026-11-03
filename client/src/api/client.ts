@@ -1,4 +1,4 @@
-import type { Asset, AuthUser, College, Course, CourseModule, CourseProgress, Language, ProgressSummary, QuizQuestion, QuizResult, TeacherStats, UploadTicket, UserRole, WeeklyGoal } from "../types";
+import type { Asset, AuthUser, College, CollegeStats, Course, CourseModule, CourseProgress, Language, ProgressSummary, QuizQuestion, QuizResult, TeacherStats, UploadTicket, UserRole, WeeklyGoal } from "../types";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -59,6 +59,7 @@ export const api = {
 
   listCourses: () => request<{ courses: Course[] }>("/courses"),
   listMyCourses: () => request<{ courses: Course[] }>("/courses/mine"),
+  getCourse: (id: string) => request<{ course: Course }>(`/courses/${encodeURIComponent(id)}`),
   createCourse: (values: Record<string, unknown>) =>
     request<{ course: Course }>("/courses", { method: "POST", body: JSON.stringify(values) }),
   updateCourse: (id: string, values: Record<string, unknown>) =>
@@ -110,6 +111,9 @@ export const api = {
     request<{ goal: WeeklyGoal }>("/users/weekly-goal", { method: "PUT", body: JSON.stringify(values) }),
 
   listColleges: () => request<{ colleges: College[] }>("/colleges"),
+  listCollegesStatsSummary: () =>
+    request<{ colleges: CollegeStats[] }>("/colleges/stats/summary"),
+  getCollegeStats: (id: string) => request<{ stats: CollegeStats }>(`/colleges/${encodeURIComponent(id)}/stats`),
   createCollege: (values: Record<string, unknown>) =>
     request<{ college: College; admin: AuthUser | null }>("/colleges", { method: "POST", body: JSON.stringify(values) }),
   updateCollege: (id: string, values: Record<string, unknown>) =>

@@ -7,8 +7,8 @@ import {
   resolveCourseAccess,
   courseScopeFilter,
   canManageCourse,
-  teacherCourseFilter,
 } from "../utils/access.js";
+import { canAdminCollege } from "../utils/scope.js";
 import { collegeVisibilityFilter } from "../utils/scope.js";
 import { normalizeModules, flattenModules } from "../utils/curriculum.js";
 
@@ -17,6 +17,27 @@ import { normalizeModules, flattenModules } from "../utils/curriculum.js";
  * either an ObjectId or a slug. A raw findById(slug) would throw a CastError
  * and surface as a 500.
  */
+/** Grant a course slug to selected department subdocuments (super admin or college admin). */
+async function grantCourseToDepartments(slug, departmentIds, user) {
+  const ids = [...new Set((departmentIds ?? []).map(String).filter(Boolean))];
+  if (!ids.length) return 0;
+  const query = user.role === "collegeAdmin" ? { _id: user.collegeId } : {};
+  const colleges = await College.find(query);
+  let granted = 0;
+  for (const college of colleges) {
+    for (const dept of college.departments ?? []) {
+      if (!ids.includes(String(dept._id))) continue;
+      if (user.role === "collegeAdmin" && !canAdminCollege(user, college._id)) continue;
+      await College.updateOne(
+        { _id: college._id, "departments._id": dept._id },
+        { $addToSet: { "departments.$.allowedCourseIds": slug } }
+      );
+      granted += 1;
+    }
+  }
+  return granted;
+}
+
 async function findCourse(idOrSlug) {
   const key = String(idOrSlug ?? "");
   if (mongoose.isValidObjectId(key)) {
@@ -34,7 +55,6 @@ export async function listCourses(req, res) {
     const conditions = [];
     const scopeFilter = courseScopeFilter(access);
     if (Object.keys(scopeFilter).length) conditions.push(scopeFilter);
-    if (req.user?.role === "teacher") conditions.push(teacherCourseFilter(req.user.email));
     const collegeFilter = collegeVisibilityFilter(req.user);
     if (Object.keys(collegeFilter).length) conditions.push(collegeFilter);
     const filter = conditions.length ? { $and: conditions } : {};
@@ -54,6 +74,20 @@ export async function listMyCourses(req, res) {
   }
 }
 
+/** Single course for authoring — always reads the latest document from MongoDB. */
+export async function getCourse(req, res) {
+  try {
+    const course = await findCourse(req.params.id);
+    if (!course) return res.status(404).json({ error: "Course was not found." });
+    if (!canManageCourse(req.user, course)) {
+      return res.status(403).json({ error: "You can only edit courses you manage." });
+    }
+    res.json({ course: course.toPublic() });
+  } catch (error) {
+    serverError(res, error, "courses.get");
+  }
+}
+
 export async function createCourse(req, res) {
   try {
     const title = String(req.body.title ?? "").trim();
@@ -62,6 +96,15 @@ export async function createCourse(req, res) {
     if (!slug) return res.status(400).json({ error: "Course title must include letters or numbers." });
     const existing = await Course.findOne({ slug });
     if (existing) return res.status(409).json({ error: "A course with this title already exists." });
+
+    if (req.user.role === "teacher") {
+      if (!req.user.collegeId || !req.user.departmentId) {
+        return res.status(400).json({ error: "Your account must belong to a department before you create courses." });
+      }
+    }
+    if (req.user.role === "collegeAdmin" && !req.user.collegeId) {
+      return res.status(400).json({ error: "Your college admin account is not linked to a college." });
+    }
 
     const course = await Course.create({
       slug,
@@ -98,7 +141,13 @@ export async function createCourse(req, res) {
       }
     }
 
-    res.status(201).json({ course: course.toPublic() });
+    const departmentIds = Array.isArray(req.body.departmentIds) ? req.body.departmentIds : [];
+    const granted =
+      req.user.role === "admin" || req.user.role === "collegeAdmin"
+        ? await grantCourseToDepartments(slug, departmentIds, req.user)
+        : 0;
+
+    res.status(201).json({ course: course.toPublic(), departmentsGranted: granted });
   } catch (error) {
     serverError(res, error, "course.write");
   }

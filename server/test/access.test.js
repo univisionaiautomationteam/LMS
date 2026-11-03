@@ -22,8 +22,16 @@ const student = (overrides = {}) => ({
 
 test("staff roles are unrestricted", () => {
   assert.equal(courseAccessFor({ role: "admin" }, null).unrestricted, true);
-  assert.equal(courseAccessFor({ role: "teacher" }, null).unrestricted, true);
   assert.equal(courseAccessFor({ role: "collegeAdmin", collegeId: "college-1" }, null).unrestricted, true);
+});
+
+test("teacher and student are scoped to active department grants", () => {
+  const teacherAccess = courseAccessFor(
+    { role: "teacher", collegeId: "college-1", departmentId: "dept-cse" },
+    college()
+  );
+  assert.equal(teacherAccess.unrestricted, false);
+  assert.deepEqual([...teacherAccess.slugs], ["python", "cpp"]);
 });
 
 test("access fails closed for missing, unassigned or inactive users", () => {

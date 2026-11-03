@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { WeeklyGoal } from "../types";
+import { usePopup } from "../context/PopupContext";
 
 export function formatMinutes(minutes: number): string {
   const total = Math.max(0, Math.round(minutes));
@@ -23,9 +24,10 @@ function hoursInput(minutes: number): string {
 export default function WeeklyGoalCard() {
   const [goal, setGoal] = useState<WeeklyGoal | null>(null);
   const [editing, setEditing] = useState(false);
-  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(true);
   const [targetHours, setTargetHours] = useState("5");
   const [loggedHours, setLoggedHours] = useState("0");
+  const { success, error } = usePopup();
 
   useEffect(() => {
     api
@@ -35,7 +37,8 @@ export default function WeeklyGoalCard() {
         setTargetHours(hoursInput(goal.targetMinutes));
         setLoggedHours(hoursInput(goal.completedMinutes));
       })
-      .catch(() => setStatus("Could not load your weekly goal."));
+      .catch(() => error("Load failed", "Could not load your weekly goal."))
+      .finally(() => setLoading(false));
   }, []);
 
   async function save(e: React.FormEvent<HTMLFormElement>) {
@@ -43,21 +46,20 @@ export default function WeeklyGoalCard() {
     const targetMinutes = Math.round(Number(targetHours) * 60);
     const completedMinutes = Math.round(Number(loggedHours) * 60);
     if (!Number.isFinite(targetMinutes) || targetMinutes < 15) {
-      setStatus("Set a target of at least 15 minutes.");
+      error("Save failed", "Set a target of at least 15 minutes.");
       return;
     }
     if (!Number.isFinite(completedMinutes) || completedMinutes < 0) {
-      setStatus("Completed time cannot be negative.");
+      error("Save failed", "Completed time cannot be negative.");
       return;
     }
-    setStatus("Saving…");
     try {
       const { goal: saved } = await api.updateWeeklyGoal({ targetMinutes, completedMinutes });
       setGoal(saved);
       setEditing(false);
-      setStatus("");
+      success("Goal saved", "Your weekly learning goal has been updated.");
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Unable to save your goal.");
+      error("Save failed", err instanceof Error ? err.message : "Unable to save your goal.");
     }
   }
 
@@ -68,7 +70,7 @@ export default function WeeklyGoalCard() {
     <div className="sidebar-card">
       <span className="eyebrow">Weekly goal</span>
 
-      {!goal && <p>{status || "Loading goal…"}</p>}
+      {!goal && <p>{loading ? "Loading goal…" : "No goal set yet."}</p>}
 
       {goal && !editing && (
         <>
@@ -115,8 +117,6 @@ export default function WeeklyGoalCard() {
           </div>
         </form>
       )}
-
-      {status && goal && <p role="status">{status}</p>}
     </div>
   );
 }

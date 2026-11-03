@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { CheckCircle, AlertCircle, Info, AlertTriangle } from "lucide-react";
 
 export type PopupType = "success" | "error" | "info" | "warning";
 
@@ -24,20 +23,6 @@ export interface PopupContextType {
 const PopupContext = createContext<PopupContextType | undefined>(undefined);
 
 let nextId = 0;
-
-const POPUP_ICONS: Record<PopupType, React.ReactNode> = {
-  success: <CheckCircle size={18} strokeWidth={2.5} />,
-  error: <AlertCircle size={18} strokeWidth={2.5} />,
-  info: <Info size={18} strokeWidth={2.5} />,
-  warning: <AlertTriangle size={18} strokeWidth={2.5} />,
-};
-
-const POPUP_COLORS: Record<PopupType, string> = {
-  success: "border-green-400 bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-200",
-  error: "border-red-400 bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-200",
-  info: "border-blue-400 bg-blue-50 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200",
-  warning: "border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200",
-};
 
 export function PopupProvider({ children }: { children: React.ReactNode }) {
   const [popups, setPopups] = useState<PopupNotification[]>([]);

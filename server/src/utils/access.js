@@ -28,7 +28,7 @@ function resolveDepartment(user, college) {
  */
 export function courseAccessFor(user, college) {
   if (!user) return EMPTY;
-  if (user.role === "admin" || user.role === "collegeAdmin" || user.role === "teacher") return UNRESTRICTED;
+  if (user.role === "admin" || user.role === "collegeAdmin") return UNRESTRICTED;
   if (!user.collegeId) return EMPTY;
   if (!college || !college.active) return EMPTY;
 
@@ -44,31 +44,46 @@ export function courseAccessFor(user, college) {
  * own department: a faculty upload is part of the department that teaches it,
  * so students see it without an admin having to tick it on the access grid.
  */
+async function slugsForDepartmentMember(user, college) {
+  const department = resolveDepartment(user, college);
+  const slugs = new Set();
+  const own = await Course.find({ createdBy: user.email }).select("slug").lean();
+  for (const course of own) slugs.add(course.slug);
+
+  if (!college?.active || !department || !department.active) {
+    return { unrestricted: false, slugs: Object.freeze([...slugs]) };
+  }
+
+  for (const slug of department.allowedCourseIds ?? []) slugs.add(slug);
+
+  if (user.role === "student") {
+    const faculty = await Teacher.find({
+      collegeId: user.collegeId,
+      $or: [{ departmentId: department._id }, { department: department.name }],
+    })
+      .select("email")
+      .lean();
+    const emails = faculty.map((teacher) => teacher.email).filter(Boolean);
+    if (emails.length) {
+      const facultyCourses = await Course.find({ createdBy: { $in: emails } }).select("slug").lean();
+      for (const course of facultyCourses) slugs.add(course.slug);
+    }
+  }
+
+  return { unrestricted: false, slugs: Object.freeze([...slugs]) };
+}
+
 export async function resolveCourseAccess(user) {
-  if (!user || user.role === "admin" || user.role === "collegeAdmin" || user.role === "teacher" || !user.collegeId) {
+  if (!user || user.role === "admin" || user.role === "collegeAdmin") {
     return courseAccessFor(user, null);
   }
+  if (!user.collegeId) return EMPTY;
+
   const college = await College.findById(user.collegeId).select("active departments").lean();
-  const access = courseAccessFor(user, college);
-  if (access.unrestricted) return access;
-
-  const department = resolveDepartment(user, college);
-  // Anything unresolved, inactive or unassigned already fails closed above.
-  if (!college?.active || !department || !department.active) return access;
-
-  const faculty = await Teacher.find({
-    collegeId: user.collegeId,
-    $or: [{ departmentId: department._id }, { department: department.name }],
-  })
-    .select("email")
-    .lean();
-  const emails = faculty.map((teacher) => teacher.email).filter(Boolean);
-  if (!emails.length) return access;
-
-  const facultyCourses = await Course.find({ createdBy: { $in: emails } }).select("slug").lean();
-  const slugs = new Set(access.slugs);
-  for (const course of facultyCourses) slugs.add(course.slug);
-  return { unrestricted: false, slugs: Object.freeze([...slugs]) };
+  if (user.role === "teacher" || user.role === "student") {
+    return slugsForDepartmentMember(user, college);
+  }
+  return courseAccessFor(user, college);
 }
 
 /** Mongo filter that keeps a query inside the caller's course scope. */

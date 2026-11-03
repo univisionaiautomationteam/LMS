@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, uploadFile } from "../api/client";
 import type { Asset, Course, CourseModule, Lesson, LessonQuiz, LessonQuizQuestion } from "../types";
+import { usePopup } from "../context/PopupContext";
 
 // Keep in step with MAX_UPLOAD_BYTES on the server (1 GB).
 const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
@@ -50,6 +51,7 @@ export default function CurriculumBuilder({
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploadingKey, setUploadingKey] = useState("");
+  const { success, error: showError } = usePopup();
 
   function patchModule(index: number, patch: Partial<CourseModule>) {
     setModules((current) => current.map((module, i) => (i === index ? { ...module, ...patch } : module)));
@@ -117,7 +119,7 @@ export default function CurriculumBuilder({
     const lesson = modules[mi]?.lessons[li];
     if (!lesson) return;
     if (file.size > MAX_UPLOAD_BYTES) {
-      setStatus(`That file is too large. The limit is ${MAX_UPLOAD_LABEL}.`);
+      showError("Upload failed", `That file is too large. The limit is ${MAX_UPLOAD_LABEL}.`);
       return;
     }
     const kind = lesson.type === "document" ? "document" : "video";
@@ -147,9 +149,12 @@ export default function CurriculumBuilder({
       });
       patchLesson(mi, li, { assetId: asset._id });
       onAssetUploaded?.(asset);
-      setStatus(`Linked ${file.name} to “${lesson.title || "lesson"}”.`);
+      setStatus("");
+      success("File linked", `“${file.name}” is attached to this lesson.`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Upload failed.");
+      const msg = err instanceof Error ? err.message : "Upload failed.";
+      setStatus("");
+      showError("Upload failed", msg);
     } finally {
       setUploadingKey("");
     }
@@ -158,12 +163,17 @@ export default function CurriculumBuilder({
   async function save() {
     setSaving(true);
     setStatus("Saving curriculum…");
+    const courseId = course._id ?? course.slug;
     try {
-      const { course: updated } = await api.saveCurriculum(course._id ?? course.slug, modules);
+      const { course: updated } = await api.saveCurriculum(courseId, modules);
+      setModules(seed(updated));
       onSaved(updated);
-      setStatus("Curriculum saved. Learners will see the new structure immediately.");
+      setStatus("");
+      success("Curriculum saved", `“${updated.title}” curriculum is stored in the database.`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Could not save the curriculum.");
+      const msg = err instanceof Error ? err.message : "Could not save the curriculum.";
+      setStatus("");
+      showError("Save failed", msg);
     } finally {
       setSaving(false);
     }
@@ -332,7 +342,7 @@ export default function CurriculumBuilder({
       ))}
 
       <button className="outline-small builder-add-module" type="button" onClick={addModule}>+ Add module</button>
-      {status && <p className="admin-status" role="status">{status}</p>}
+      {(saving || uploadingKey) && status ? <p className="admin-status" role="status">{status}</p> : null}
     </div>
   );
 }

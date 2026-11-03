@@ -3,7 +3,7 @@ import { Admin } from "../models/Admin.js";
 import { CollegeAdmin } from "../models/CollegeAdmin.js";
 import { Teacher } from "../models/Teacher.js";
 import { Student } from "../models/Student.js";
-import { findUserByEmail, findAllUsers, countUsers } from "../utils/userLookup.js";
+import { findUserByEmail, findAllUsers, findUserById } from "../utils/userLookup.js";
 import { signToken } from "../middleware/auth.js";
 import {
   validateEmail,
@@ -16,6 +16,8 @@ import {
   isAdminRole,
 } from "../utils/helpers.js";
 import { isSuperAdmin, scopeToCollege } from "../utils/scope.js";
+import { assertEmailAllowedForCollege, emailDomain, loadDomainRegistry } from "../utils/domains.js";
+import { College } from "../models/College.js";
 
 const MODEL_BY_ROLE = {
   admin: Admin,
@@ -71,7 +73,18 @@ export async function createUser(req, res) {
       return res.status(400).json({ error: "Your account is not assigned to any college. Contact the super admin." });
     }
     // The creator's own college always wins for non-super accounts.
-    const collegeId = superAdmin ? req.body.collegeId || null : actor.collegeId;
+    let collegeId = superAdmin ? req.body.collegeId || null : actor.collegeId;
+
+    // Super admin: infer college from email domain when none selected.
+    if (superAdmin && !collegeId && (role === "teacher" || role === "student" || role === "collegeAdmin")) {
+      const domain = emailDomain(email);
+      if (domain) {
+        const { domainOwner } = await loadDomainRegistry();
+        const owner = domainOwner.get(domain);
+        if (owner) collegeId = owner.collegeId;
+      }
+    }
+
     if ((role === "student" || role === "teacher") && !collegeId) {
       return res.status(400).json({ error: `Select a college for this ${role} account.` });
     }
@@ -80,6 +93,16 @@ export async function createUser(req, res) {
     }
     if (role === "collegeAdmin" && !collegeId) {
       return res.status(400).json({ error: "Select a college for this college admin account." });
+    }
+
+    if (role !== "admin") {
+      const domainCheck = await assertEmailAllowedForCollege(email, collegeId, { role });
+      if (!domainCheck.ok) return res.status(400).json({ error: domainCheck.error });
+    }
+
+    // Non-super admins cannot assign users to another college.
+    if (!superAdmin && collegeId && String(collegeId) !== String(actor.collegeId)) {
+      return res.status(403).json({ error: "You can only create accounts in your own college." });
     }
 
     const existing = await findUserByEmail(email);
@@ -123,17 +146,7 @@ export async function bulkCreateUsers(req, res) {
     const superAdmin = isSuperAdmin(req.user);
     const defaultPassword = String(req.body.defaultPassword ?? "");
 
-    // College domains drive both auto-routing (email -> college) and validation
-    // (an imported address must belong to a domain the target college owns).
-    const { College } = await import("../models/College.js");
-    const colleges = await College.find().select("code domains").lean();
-    const domainOwner = new Map();
-    const domainsByCollege = new Map();
-    for (const college of colleges) {
-      const domains = new Set((college.domains ?? []).map((d) => String(d).toLowerCase()));
-      domainsByCollege.set(String(college._id), domains);
-      for (const domain of domains) domainOwner.set(domain, String(college._id));
-    }
+    const { domainOwner, domainsByCollege } = await loadDomainRegistry();
 
     const rejected = [];
     const acceptedByEmail = new Map();
@@ -159,7 +172,7 @@ export async function bulkCreateUsers(req, res) {
       // College comes from the actor for a college admin, from the row (or the
       // email domain) for the super admin.
       let collegeId = superAdmin ? row.collegeId || "" : req.user.collegeId;
-      if (!collegeId && domain && domainOwner.has(domain)) collegeId = domainOwner.get(domain);
+      if (!collegeId && domain && domainOwner.has(domain)) collegeId = domainOwner.get(domain).collegeId;
 
       if (role === "student" && !collegeId) issues.push("a valid college is required");
       if ((role === "student" || role === "teacher") && !row.departmentId && !row.department) {
@@ -168,7 +181,10 @@ export async function bulkCreateUsers(req, res) {
 
       const allowedDomains = collegeId ? domainsByCollege.get(String(collegeId)) : null;
       if (allowedDomains && allowedDomains.size && domain && !allowedDomains.has(domain)) {
-        issues.push(`email domain @${domain} is not allowed for this college`);
+        issues.push(`email must use one of this college's domains (${[...allowedDomains].map((d) => `@${d}`).join(", ")})`);
+      }
+      if (collegeId && allowedDomains && !allowedDomains.size) {
+        issues.push("target college has no email domains configured");
       }
 
       if (issues.length) {
@@ -291,6 +307,14 @@ export async function updateProfile(req, res) {
       values.department = String(user.department ?? "").trim();
     }
 
+    if (user.role === "collegeAdmin" && user.collegeId) {
+      const college = await College.findById(user.collegeId).select("name").lean();
+      if (college?.name) {
+        values.collegeName = college.name;
+      }
+      values.department = "";
+    }
+
     if (req.body.newPassword) {
       const currentPassword = String(req.body.currentPassword ?? "");
       if (!currentPassword) {
@@ -305,7 +329,12 @@ export async function updateProfile(req, res) {
       }
     }
 
-    const lockedCollege = user.collegeNameLocked ? (user.profile?.collegeName ?? "") : "";
+    let lockedCollege = "";
+    if (user.role === "collegeAdmin") {
+      lockedCollege = String(values.collegeName ?? user.profile?.collegeName ?? "").trim();
+    } else if (user.collegeNameLocked) {
+      lockedCollege = user.profile?.collegeName ?? "";
+    }
 
     const built = buildProfile(
       values,
@@ -319,6 +348,10 @@ export async function updateProfile(req, res) {
     }
 
     user.profile = built.profile;
+
+    if (user.role === "collegeAdmin" && lockedCollege) {
+      user.collegeNameLocked = true;
+    }
 
     if (req.body.newPassword) {
       user.passwordHash = await bcrypt.hash(String(req.body.newPassword), 10);

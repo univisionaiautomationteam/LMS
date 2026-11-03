@@ -25,7 +25,6 @@ export default function CoursePage({
   const [videoSrc, setVideoSrc] = useState("");
   const [busy, setBusy] = useState(false);
   const [noteText, setNoteText] = useState("");
-  const [noteSaved, setNoteSaved] = useState("");
   const { success, error } = usePopup();
 
   // A course ships its own modules; the bundled outline is only a fallback for a
@@ -101,8 +100,9 @@ export default function CoursePage({
     try {
       await api.setLessonProgress(course.slug, activeLesson.key, !done);
       onRefreshProgress();
-    } catch {
-      // A failed write leaves the button state unchanged; the next refresh reconciles.
+      success(!done ? "Progress saved" : "Progress updated", !done ? "Lesson marked complete." : "Lesson marked incomplete.");
+    } catch (err) {
+      error("Save failed", err instanceof Error ? err.message : "Could not update your progress.");
     } finally {
       setBusy(false);
     }
@@ -186,8 +186,7 @@ export default function CoursePage({
               <div className="notes-panel">
                 <h2>Private notes</h2>
                 <textarea aria-label="Private lesson notes" placeholder="Write a takeaway, code snippet, or reminder…" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
-                <div><small>Notes remain private to your learning workspace.</small><button className="primary-small" type="button" onClick={() => { if (noteText.trim()) { try { localStorage.setItem("lms_note_" + course.slug + "_" + (activeLesson?.key || lesson), noteText); setNoteSaved("Note saved!"); setTimeout(function(){ setNoteSaved(""); }, 2000); } catch(e){} success("Note saved", "Your private note has been saved."); } else { error("Save failed", "Please write something before saving."); } }}>Save note</button></div>
-                {noteSaved ? <small style={{ color: "var(--green)" }}>{noteSaved}</small> : null}
+                <div><small>Notes remain private to your learning workspace.</small><button className="primary-small" type="button" onClick={() => { if (noteText.trim()) { try { localStorage.setItem("lms_note_" + course.slug + "_" + (activeLesson?.key || lesson), noteText); success("Note saved", "Your private note has been saved."); } catch { error("Save failed", "Could not save your note in this browser."); } } else { error("Save failed", "Please write something before saving."); } }}>Save note</button></div>
               </div>
             )}
           </>

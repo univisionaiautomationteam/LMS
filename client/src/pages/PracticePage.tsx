@@ -13,7 +13,7 @@ export default function PracticePage() {
   const [running, setRunning] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
   const [quizScore, setQuizScore] = useState<number | null>(null);
-  const { success } = usePopup();
+  const { success, error: showError } = usePopup();
 
   function changeLanguage(next: Language) {
     setLanguage(next);
@@ -52,8 +52,10 @@ export default function PracticePage() {
       setOutput(data.output || "Program finished without output.");
       setRunMeta({ status: data.status, mode: data.mode, durationMs: data.durationMs, time: data.time, memory: data.memory });
     } catch (err) {
-      setOutput(err instanceof Error ? err.message : "The runner is temporarily unavailable. Try again.");
+      const msg = err instanceof Error ? err.message : "The runner is temporarily unavailable. Try again.";
+      setOutput(msg);
       setRunMeta({ status: "Failed", mode: "Runner unavailable", durationMs: 0 });
+      showError("Run failed", msg);
     } finally {
       setRunning(false);
     }
