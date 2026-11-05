@@ -2,6 +2,8 @@ import { Admin } from "../models/Admin.js";
 import { CollegeAdmin } from "../models/CollegeAdmin.js";
 import { Teacher } from "../models/Teacher.js";
 import { Student } from "../models/Student.js";
+import { User } from "../models/User.js";
+import { resolvePasswordHash } from "./passwordHash.js";
 
 const MODEL_BY_ROLE = {
   admin: Admin,
@@ -20,7 +22,18 @@ export async function findUserByEmail(email) {
   const normalizedEmail = String(email ?? "").trim().toLowerCase();
   for (const [role, Model] of Object.entries(MODEL_BY_ROLE)) {
     const user = await Model.findOne({ email: normalizedEmail });
-    if (user) return { user, role };
+    if (user) {
+      const hash = await resolvePasswordHash(user);
+      if (hash) return { user, role };
+    }
+  }
+  const legacy = await User.findOne({ email: normalizedEmail });
+  if (legacy) {
+    const hash = await resolvePasswordHash(legacy);
+    if (hash) {
+      const role = legacy.role || "student";
+      return { user: legacy, role };
+    }
   }
   return null;
 }
@@ -30,6 +43,11 @@ export async function findUserById(id) {
   for (const [role, Model] of Object.entries(MODEL_BY_ROLE)) {
     const user = await Model.findById(id);
     if (user) return { user, role };
+  }
+  const legacy = await User.findById(id);
+  if (legacy) {
+    const role = legacy.role || "student";
+    return { user: legacy, role };
   }
   return null;
 }

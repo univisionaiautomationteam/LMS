@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { resolvePasswordHash } from "../utils/passwordHash.js";
 import { Admin } from "../models/Admin.js";
 import { CollegeAdmin } from "../models/CollegeAdmin.js";
 import { Teacher } from "../models/Teacher.js";
@@ -320,7 +321,11 @@ export async function updateProfile(req, res) {
       if (!currentPassword) {
         return res.status(400).json({ error: "Enter your current password to set a new one." });
       }
-      const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+      const currentHash = await resolvePasswordHash(user);
+      if (!currentHash) {
+        return res.status(400).json({ error: "Your account has no password set. Contact an administrator." });
+      }
+      const matches = await bcrypt.compare(currentPassword, currentHash);
       if (!matches) {
         return res.status(400).json({ error: "Your current password is incorrect." });
       }

@@ -12,6 +12,7 @@
     "seed:demo": "node src/seed-demo.js",
     "migrate:colleges": "node src/migrate-colleges.js",
     "migrate:curriculum": "node src/migrate-curriculum.js",
+    "migrate:users": "node src/migrate-users.js",
     "test": "node --test test/"
   },
   "dependencies": {

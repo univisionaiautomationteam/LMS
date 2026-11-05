@@ -3,7 +3,8 @@ import { Admin } from "../models/Admin.js";
 import { CollegeAdmin } from "../models/CollegeAdmin.js";
 import { Teacher } from "../models/Teacher.js";
 import { Student } from "../models/Student.js";
-import { findUserByEmail, findUserById } from "../utils/userLookup.js";
+import { findUserByEmail } from "../utils/userLookup.js";
+import { resolvePasswordHash } from "../utils/passwordHash.js";
 import { signToken } from "../middleware/auth.js";
 import { validateEmail, serverError, ClientError, PASSWORD_MIN } from "../utils/helpers.js";
 import { assertLoginDomainAllowed } from "../utils/domains.js";
@@ -27,7 +28,18 @@ export async function login(req, res) {
     if (!user.active) {
       return res.status(401).json({ error: "Email or password is incorrect." });
     }
-    const ok = await bcrypt.compare(password, user.passwordHash);
+    const passwordHash = await resolvePasswordHash(user);
+    if (!passwordHash) {
+      console.error(
+        `[auth.login] Account ${email} (${role}) has no password hash — run npm run migrate:users or npm run seed on the server.`
+      );
+      return res.status(401).json({ error: "Email or password is incorrect." });
+    }
+    if (!user.passwordHash) {
+      user.passwordHash = passwordHash;
+      await user.save().catch((err) => console.error("[auth.login] Could not backfill passwordHash:", err.message));
+    }
+    const ok = await bcrypt.compare(password, passwordHash);
     if (!ok) return res.status(401).json({ error: "Email or password is incorrect." });
 
     const domainCheck = await assertLoginDomainAllowed(user, role);
