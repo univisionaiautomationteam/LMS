@@ -8,6 +8,7 @@ import { resolvePasswordHash } from "../utils/passwordHash.js";
 import { signToken } from "../middleware/auth.js";
 import { validateEmail, serverError, ClientError, PASSWORD_MIN } from "../utils/helpers.js";
 import { assertLoginDomainAllowed } from "../utils/domains.js";
+import { setPortalActor } from "../middleware/portalLog.js";
 
 const MODEL_BY_ROLE = {
   admin: Admin,
@@ -20,12 +21,18 @@ export async function login(req, res) {
   try {
     const email = String(req.body.email ?? "").trim().toLowerCase();
     const password = String(req.body.password ?? "");
+    setPortalActor(req, { email, role: "login", id: null });
+
     const found = await findUserByEmail(email);
     if (!found) {
+      req.portalLogDetail = "login_user_not_found";
       return res.status(401).json({ error: "Email or password is incorrect." });
     }
     const { user, role } = found;
+    setPortalActor(req, { email: user.email, role, id: user._id.toString() });
+
     if (!user.active) {
+      req.portalLogDetail = "login_inactive";
       return res.status(401).json({ error: "Email or password is incorrect." });
     }
     const passwordHash = await resolvePasswordHash(user);
@@ -33,6 +40,7 @@ export async function login(req, res) {
       console.error(
         `[auth.login] Account ${email} (${role}) has no password hash — run npm run migrate:users or npm run seed on the server.`
       );
+      req.portalLogDetail = "login_missing_password_hash";
       return res.status(401).json({ error: "Email or password is incorrect." });
     }
     if (!user.passwordHash) {
@@ -40,12 +48,19 @@ export async function login(req, res) {
       await user.save().catch((err) => console.error("[auth.login] Could not backfill passwordHash:", err.message));
     }
     const ok = await bcrypt.compare(password, passwordHash);
-    if (!ok) return res.status(401).json({ error: "Email or password is incorrect." });
+    if (!ok) {
+      req.portalLogDetail = "login_wrong_password";
+      return res.status(401).json({ error: "Email or password is incorrect." });
+    }
 
     const domainCheck = await assertLoginDomainAllowed(user, role);
-    if (!domainCheck.ok) return res.status(403).json({ error: domainCheck.error });
+    if (!domainCheck.ok) {
+      req.portalLogDetail = "login_domain_blocked";
+      return res.status(403).json({ error: domainCheck.error });
+    }
 
     const token = signToken(user, role);
+    req.portalLogDetail = user.mustChangePassword ? "login_ok_must_change_password" : "login_ok";
 
     if (user.mustChangePassword) {
       return res.json({ user: user.toPublic ? user.toPublic() : user, token, status: "new_password_required" });

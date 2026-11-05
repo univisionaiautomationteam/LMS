@@ -1,11 +1,13 @@
 import jwt from "jsonwebtoken";
 import { findUserById } from "../utils/userLookup.js";
+import { setPortalActor } from "./portalLog.js";
 
 function authRequired(roles = []) {
   return async (req, res, next) => {
     try {
       const header = req.headers.authorization;
       if (!header || !header.startsWith("Bearer ")) {
+        req.portalLogDetail = "auth_missing_bearer";
         return res.status(401).json({ error: "Authentication required." });
       }
       const token = header.slice("Bearer ".length);
@@ -19,11 +21,29 @@ function authRequired(roles = []) {
         return res.status(401).json({ error: "Your session is no longer valid. Please sign in again." });
       }
       req.user = user;
-      if (roles.length && !roles.includes(user.role)) {
+      req.user.role = user.role ?? role;
+      setPortalActor(req, {
+        email: user.email,
+        role: req.user.role,
+        id: user._id.toString(),
+      });
+      if (roles.length && !roles.includes(req.user.role)) {
         return res.status(403).json({ error: "You do not have permission to do this." });
       }
       next();
     } catch (error) {
+      const header = req.headers.authorization;
+      if (header?.startsWith("Bearer ")) {
+        const payload = jwt.decode(header.slice("Bearer ".length));
+        if (payload && typeof payload === "object") {
+          setPortalActor(req, {
+            email: payload.email,
+            role: payload.role,
+            id: payload.sub,
+          });
+          req.portalLogDetail = "auth_failed";
+        }
+      }
       return res.status(401).json({ error: "Your session has expired. Please sign in again." });
     }
   };

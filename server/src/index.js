@@ -14,6 +14,7 @@ import dashboardRoutes from "./routes/dashboard.js";
 import teacherRoutes from "./routes/teacher.js";
 import progressRoutes from "./routes/progress.js";
 import { globalLimiter } from "./middleware/limits.js";
+import { portalLog } from "./middleware/portalLog.js";
 import { serverError } from "./utils/helpers.js";
 import { storageMode, localUploadRoot } from "./services/storage.js";
 
@@ -37,6 +38,7 @@ if (isProduction && !process.env.JWT_SECRET) {
 app.use(helmet());
 app.use(cors({ origin: origins }));
 app.use(express.json({ limit: "2mb" }));
+app.use(portalLog);
 app.use(globalLimiter);
 
 // Local-storage fallback only. When S3_BUCKET is set, files are served by S3.
