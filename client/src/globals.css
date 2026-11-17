@@ -114,7 +114,7 @@ a { text-decoration: none; color: inherit; }
 .progress-track span { display: block; height: 100%; background: var(--primary); border-radius: 99px; }
 .progress-track.thin { height: 5px; }
 .profile-chip {
-  margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px;
+  margin-top: auto; display: flex; align-items: center;
 }
 .profile-chip:hover { background: var(--surface-2); }
 .profile-chip > span {
@@ -374,10 +374,12 @@ a { text-decoration: none; color: inherit; }
 .builder-module { border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .builder-module-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
 .builder-module-head label { flex: 1; }
-.builder-lesson-fields label, .builder-quiz label, .builder-module-head label { font-size: 0.74rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); display: flex; flex-direction: column; gap: 5px; }
+.builder-lesson-fields label, .builder-module-head label, .builder-quiz .form-row > label { font-size: 0.74rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); display: flex; flex-direction: column; gap: 5px; }
+.builder-quiz .builder-field { display: flex; flex-direction: column; gap: 5px; }
+.builder-quiz .builder-field-caption { font-size: 0.74rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
 .builder-lesson { border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--surface-2); }
 .builder-lesson-fields { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: end; }
-.builder-lesson-fields input, .builder-lesson-fields select, .builder-quiz input, .builder-module-head input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; }
+.builder-lesson-fields input, .builder-lesson-fields select, .builder-quiz .form-row input, .builder-module-head input, .builder-quiz .builder-field input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; }
 .builder-file { display: flex; align-items: center; gap: 12px; font-size: 0.82rem; color: var(--text-3); }
 .file-linked { color: #147d64; font-weight: 700; }
 .file-button { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; font-weight: 600; font-size: 0.8rem; cursor: pointer; background: #fff; }
@@ -386,11 +388,38 @@ a { text-decoration: none; color: inherit; }
 .builder-add-module { align-self: flex-start; }
 .builder-quiz { display: flex; flex-direction: column; gap: 12px; }
 .builder-question { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: #fff; }
-.builder-question .question-prompt { font-weight: 600; }
-.builder-question .question-option { display: flex; align-items: center; gap: 8px; }
-.builder-question .question-option input { padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.83rem; }
-.builder-question .question-option input[type="radio"] { flex: 0 0 auto; padding: 0; accent-color: var(--primary); }
-.builder-question .question-option input:not([type="radio"]) { flex: 1; }
+.builder-question input[type="text"] {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  background: #fff;
+  caret-color: var(--text);
+}
+.builder-question .question-options-hint { margin: 0; font-size: 0.78rem; color: var(--text-3); line-height: 1.4; }
+.builder-question .question-option { display: flex; align-items: center; gap: 10px; }
+.builder-question .question-option input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  background: #fff;
+}
+.builder-question .question-option input[type="radio"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+.builder-question .question-option:has(input[type="radio"]:checked) input[type="text"] {
+  border-color: rgba(108, 92, 231, 0.45);
+  box-shadow: 0 0 0 1px rgba(108, 92, 231, 0.12);
+}
 
 /* ---------------- Practice / Code ---------------- */
 .practice-grid { display: grid; grid-template-columns: 1.5fr 0.8fr; gap: 18px; margin-bottom: 18px; }

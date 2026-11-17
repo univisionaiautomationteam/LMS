@@ -22,13 +22,32 @@ function blankLesson(type: Lesson["type"] = "video"): Lesson {
   return { key: randomKey(), title: "", type, duration: "", assetId: null, quiz: type === "quiz" ? blankQuiz() : null };
 }
 
+/** Quiz lessons from the API may have `quiz: null` until content exists — keep a writable quiz in UI state. */
+function ensureQuizLesson(lesson: Lesson): Lesson {
+  if (lesson.type !== "quiz") return lesson;
+  if (lesson.quiz?.questions?.length) return lesson;
+  return { ...lesson, quiz: blankQuiz() };
+}
+
+function ensureModules(modules: CourseModule[]): CourseModule[] {
+  return modules.map((module) => ({
+    ...module,
+    lessons: module.lessons.map(ensureQuizLesson),
+  }));
+}
+
 /** Start from the authored modules, or wrap any legacy flat outline into one. */
 function seed(course: Course): CourseModule[] {
-  if (course.modules?.length) return JSON.parse(JSON.stringify(course.modules)) as CourseModule[];
-  const lessons: Lesson[] = course.curriculum?.length
-    ? (JSON.parse(JSON.stringify(course.curriculum)) as Lesson[])
-    : [blankLesson("video")];
-  return [{ moduleId: `m-${Date.now().toString(36)}`, title: "Module 1", order: 0, lessons }];
+  let modules: CourseModule[];
+  if (course.modules?.length) {
+    modules = JSON.parse(JSON.stringify(course.modules)) as CourseModule[];
+  } else {
+    const lessons: Lesson[] = course.curriculum?.length
+      ? (JSON.parse(JSON.stringify(course.curriculum)) as Lesson[])
+      : [blankLesson("video")];
+    modules = [{ moduleId: `m-${Date.now().toString(36)}`, title: "Module 1", order: 0, lessons }];
+  }
+  return ensureModules(modules);
 }
 
 /**
@@ -80,15 +99,31 @@ export default function CurriculumBuilder({
     );
   }
 
-  function patchQuestion(mi: number, li: number, qi: number, patch: Partial<LessonQuizQuestion>) {
+  function patchQuestion(
+    mi: number,
+    li: number,
+    qi: number,
+    patch: Partial<LessonQuizQuestion> | ((question: LessonQuizQuestion) => Partial<LessonQuizQuestion>)
+  ) {
     setModules((current) =>
       current.map((module, i) =>
         i === mi
           ? {
               ...module,
               lessons: module.lessons.map((lesson, j) => {
-                if (j !== li || !lesson.quiz) return lesson;
-                return { ...lesson, quiz: { ...lesson.quiz, questions: lesson.quiz.questions.map((q, k) => (k === qi ? { ...q, ...patch } : q)) } };
+                if (j !== li || lesson.type !== "quiz") return lesson;
+                const quiz = lesson.quiz ?? blankQuiz();
+                return {
+                  ...lesson,
+                  quiz: {
+                    ...quiz,
+                    questions: quiz.questions.map((q, k) => {
+                      if (k !== qi) return q;
+                      const next = typeof patch === "function" ? patch(q) : patch;
+                      return { ...q, ...next };
+                    }),
+                  },
+                };
               }),
             }
           : module
@@ -206,8 +241,8 @@ export default function CurriculumBuilder({
           </div>
 
           {module.lessons.map((lesson, li) => {
-            const quiz = lesson.quiz ?? blankQuiz();
             const isQuiz = lesson.type === "quiz";
+            const quiz = isQuiz ? (lesson.quiz ?? blankQuiz()) : blankQuiz();
             return (
               <div className="builder-lesson" key={lesson.key}>
                 <div className="builder-lesson-fields">
@@ -251,33 +286,46 @@ export default function CurriculumBuilder({
                       </label>
                     </div>
                     {quiz.questions.map((question, qi) => (
-                      <div className="builder-question" key={qi}>
-                        <input
-                          className="question-prompt"
-                          value={question.prompt}
-                          onChange={(e) => patchQuestion(mi, li, qi, { prompt: e.target.value })}
-                          placeholder={`Question ${qi + 1}`}
-                          autoFocus={qi === 0 && !question.prompt}
-                        />
-                        {question.options.map((option, oi) => (
-                          <label className="question-option" key={oi}>
-                            <input
-                              type="radio"
-                              name={`${lesson.key}-${qi}`}
-                              checked={question.answer === oi}
-                              onChange={() => patchQuestion(mi, li, qi, { answer: oi })}
-                            />
-                            <input
-                              value={option}
-                              onChange={(e) =>
-                                patchQuestion(mi, li, qi, {
-                                  options: question.options.map((o, k) => (k === oi ? e.target.value : o)),
-                                })
-                              }
-                              placeholder={`Option ${oi + 1}`}
-                            />
-                          </label>
-                        ))}
+                      <div className="builder-question" key={`${lesson.key}-q-${qi}`}>
+                        <div className="builder-field">
+                          <span className="builder-field-caption">Question text</span>
+                          <input
+                            className="question-prompt"
+                            type="text"
+                            value={question.prompt}
+                            onChange={(e) => patchQuestion(mi, li, qi, { prompt: e.target.value })}
+                            placeholder={`Question ${qi + 1}`}
+                          />
+                        </div>
+                        <p className="question-options-hint">Click the radio for the correct answer, then type each option.</p>
+                        {question.options.map((option, oi) => {
+                          const optionId = `${lesson.key}-q${qi}-opt${oi}`;
+                          return (
+                            <div className="question-option" key={oi}>
+                              <input
+                                type="radio"
+                                id={optionId}
+                                name={`${lesson.key}-${qi}-answer`}
+                                checked={question.answer === oi}
+                                onChange={() => patchQuestion(mi, li, qi, { answer: oi })}
+                                title="Mark as correct answer"
+                              />
+                              <input
+                                type="text"
+                                aria-label={`Option ${oi + 1} for question ${qi + 1}`}
+                                value={option}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  patchQuestion(mi, li, qi, (q) => ({
+                                    options: q.options.map((o, k) => (k === oi ? value : o)),
+                                  }));
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                placeholder={`Option ${oi + 1}`}
+                              />
+                            </div>
+                          );
+                        })}
                         <button
                           className="text-button"
                           type="button"
